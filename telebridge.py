@@ -14,6 +14,7 @@ from telethon.tl.types import ChannelParticipantsSearch
 from telethon.tl.types import InputPeerEmpty
 from telethon.tl.types import PeerUser
 from telethon import utils, errors
+from telethon.errors import SessionPasswordNeededError
 import asyncio
 from apscheduler.schedulers.background import BackgroundScheduler
 import re
@@ -30,6 +31,9 @@ login_hash = os.getenv('LOGIN_HASH')
 
 global phonedb
 phonedb = {}
+
+global smsdb
+smsdb = {}
 
 global hashdb
 hashdb = {}
@@ -54,6 +58,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/exec" ,func = c_run, admin = True)
     bot.commands.register(name = "/login" ,func = login_num)
     bot.commands.register(name = "/sms" ,func = login_code)
+    bot.commands.register(name = "/pass" ,func = login_2fa)
     bot.commands.register(name = "/token" ,func = login_session)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = down_media)
@@ -113,18 +118,44 @@ def login_code(payload, replies, message):
     """Confirm session in Telegram. Example: /sms 12345"""
     try:
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb:
-          me = clientdb[message.get_sender_contact().addr].sign_in(phone=hashdb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)               
-          logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
-          replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
-          clientdb[message.get_sender_contact().addr].disconnect()
-          del clientdb[message.get_sender_contact().addr]
+          try:
+              me = clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)               
+              logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+              replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
+              clientdb[message.get_sender_contact().addr].disconnect()
+              del clientdb[message.get_sender_contact().addr]
+          except SessionPasswordNeededError:
+              smsdb[message.get_sender_contact().addr]=payload
+              replies.add(text = 'Tiene habilitada la autentificacion de doble factor, por favor introdusca /pass PASSWORD para completar el loguin.')
        else:
           replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
-    except:
+    except Exception as e:
        code = str(sys.exc_info())
        print(code)
        if replies:
           replies.add(text=code)
+            
+def login_2fa(payload, replies, message):
+    """Confirm session in Telegram with 2FA. Example: /pass PASSWORD"""
+    try:
+       if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
+          me = clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)               
+          logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+          replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
+          clientdb[message.get_sender_contact().addr].disconnect()
+          del clientdb[message.get_sender_contact().addr]
+          del smsdb[message.get_sender_contact().addr]  
+       else:
+          if message.get_sender_contact().addr not in clientdb:
+             replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
+          else:
+             if message.get_sender_contact().addr not in smsdb:
+                replies.add(text = 'Debe introducir primero el sms que le ha sido enviado con /sms CODIGO')    
+    except:
+       code = str(sys.exc_info())
+       print(code)
+       if replies:
+          replies.add(text=code)            
             
 def login_session(payload, replies, message):
     """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
