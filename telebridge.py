@@ -23,13 +23,19 @@ from datetime import datetime
 
 
 
-version = "0.1.3"
+version = "0.1.2"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 
 global phonedb
 phonedb = {}
+
+global hashdb
+hashdb = {}
+
+global clientdb
+clientdb = {}
 
 global logindb
 logindb = {}
@@ -43,56 +49,60 @@ chatdb = {}
 def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
-    bot.commands.register(name = "/more" ,func = load_chat_messages, admin = True)
-    bot.commands.register(name = "/load" ,func = updater, admin = True)
+    bot.commands.register(name = "/more" ,func = load_chat_messages)
+    bot.commands.register(name = "/load" ,func = updater)
     bot.commands.register(name = "/exec" ,func = c_run, admin = True)
-    bot.commands.register(name = "/login" ,func = login_num, admin = True)
-    bot.commands.register(name = "/sms" ,func = login_code, admin = True)
-    bot.commands.register(name = "/remove" ,func = remove_chat, admin = True)
-    #bot.commands.register(name = "/tg" ,func = remove_chat, admin = True)
+    bot.commands.register(name = "/login" ,func = login_num)
+    bot.commands.register(name = "/sms" ,func = login_code)
+    bot.commands.register(name = "/token" ,func = login_session)
+    bot.commands.register(name = "/remove" ,func = remove_chat)
+    bot.commands.register(name = "/down" ,func = down_media)
     
 def remove_chat(payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
        you can pass the all parametre to remove all chats like: /remove all"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
     if payload == 'all':
-       chatdb.clear()
+       chatdb[message.get_sender_contact().addr].clear()
        replies.add(text = 'Se desvincularon todos sus chats de telegram.')
-    if str(message.chat.id) in chatdb.values():   
-       for (key, value) in chatdb.items():
-           if value == str(message.chat.id):
-              del chatdb[key]
-              replies.add(text = 'Se desvinculó el chat delta '+value+' con el chat telegram '+key)
+    if str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():   
+       for (key, value) in chatdb[message.get_sender_contact().addr].items():
+           if value == str(message.chat.get_color()):
+              del chatdb[message.get_sender_contact().addr][key]
+              replies.add(text = 'Se desvinculó el chat delta '+str(message.chat.id)+' con el chat telegram '+key)
     else:
        replies.add(text = 'Este chat no está vinculado a telegram')
     try:
        loop = asyncio.new_event_loop()
        asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(login_hash), api_id, api_hash) as client:
-            tf = open('chatdb.json', 'w')
-            json.dump(chatdb, tf)
+       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
+            tf = open(message.get_sender_contact().addr+'.json', 'w')
+            json.dump(chatdb[message.get_sender_contact().addr], tf)
             tf.close()
-            client.edit_message('me',client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id),'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = 'chatdb.json')
+            client.edit_message('me',client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id),'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = message.get_sender_contact().addr+'.json')
             client.disconnect()
     except:
        code = str(sys.exc_info())
        print(code)
        if replies:
           replies.add(text=code)
-
-             
+            
+                                   
 def login_num(payload, replies, message):
     """Start session in Telegram. Example: /login +5312345678"""
     try:
        loop = asyncio.new_event_loop()
        asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(), api_id, api_hash) as client:
-            phonedb[message.get_sender_contact().addr] = payload
-            client.send_code_request(payload)
-            #if not client.is_user_authorized():
-             
-               #client.send_code_request(payload) 
-            replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', por favor introdusca /sms CODIGO para iniciar')
-            #client.disconnect()
+       clientdb[message.get_sender_contact().addr] = TelegramClient(StringSession(), api_id, api_hash)
+       clientdb[message.get_sender_contact().addr].connect()
+       me = clientdb[message.get_sender_contact().addr].send_code_request(payload)
+       hashdb[message.get_sender_contact().addr] = me.phone_code_hash
+       phonedb[message.get_sender_contact().addr] = payload
+       replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', por favor introdusca /sms CODIGO para iniciar')
     except:
        code = str(sys.exc_info())
        print(code)
@@ -102,35 +112,51 @@ def login_num(payload, replies, message):
 def login_code(payload, replies, message):
     """Confirm session in Telegram. Example: /sms 12345"""
     try:
-       loop = asyncio.new_event_loop()
-       asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(), api_id, api_hash) as client:
-            #client.connect()
-            #if not client.is_user_authorized():
-            if message.get_sender_contact().addr in phonedb:
-               client.sign_in(phonedb[message.get_sender_contact().addr], payload)
-               client.connect()
-               logindb[message.get_sender_contact().addr]=client.session.save()
-               replies.add(text = 'Se ha iniciado sesion correctamente')
-            else:
-               replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
-            #else:
-               #replies.add(text = 'Se ha iniciado sesion correctamente') 
-            client.disconnect()
+       if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb:
+          me = clientdb[message.get_sender_contact().addr].sign_in(phone=hashdb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)               
+          logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+          replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
+          clientdb[message.get_sender_contact().addr].disconnect()
+          del clientdb[message.get_sender_contact().addr]
+       else:
+          replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
     except:
        code = str(sys.exc_info())
        print(code)
        if replies:
-          replies.add(text=code)            
+          replies.add(text=code)
+            
+def login_session(payload, replies, message):
+    """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
+    if message.get_sender_contact().addr not in logindb:
+       try:
+          loop = asyncio.new_event_loop()
+          asyncio.set_event_loop(loop)
+          with TelegramClient(StringSession(payload), api_id, api_hash) as client:
+               replies.add(text='Ah iniciado sesión correctamente '+str(client.get_me().first_name))
+               logindb[message.get_sender_contact().addr] = payload
+               client.disconnect()
+       except:
+          code = str(sys.exc_info())
+          print(code)
+          replies.add(text='Error al iniciar sessión:\n'+code)
+    else:
+       replies.add(text='Su token es:\n\n'+logindb[message.get_sender_contact().addr]) 
 
 def updater(bot, payload, replies, message):
-    """Load chats from telegram"""
+    """Load chats from telegram. Example: /load
+    you can pass privates for load private only chats like: /load privates"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
     try:
        replies.add(text = 'Obteniedo chats...')
        contacto = message.get_sender_contact()
        loop = asyncio.new_event_loop()
        asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(login_hash), api_id, api_hash) as client:
+       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
             all_chats = client.get_dialogs()
             chats_limit = 5
             for d in all_chats:
@@ -141,57 +167,105 @@ def updater(bot, payload, replies, message):
                 ttitle = "Unknown"
                 if hasattr(d,'title'):
                    ttitle = d.title
-                if str(d.id) not in chatdb and not private_only:
+                if str(d.id) not in chatdb[message.get_sender_contact().addr] and not private_only:
                    chat_id = bot.create_group(ttitle, [contacto])
                    img = client.download_profile_photo(d.entity)
                    if img and os.path.exists(img): 
                       chat_id.set_profile_image(img)
                    chats_limit-=1
-                   #if str(chat_id.id) not in chatdb.values():
-                   chatdb[str(d.id)] = str(chat_id.id)
-                #else:
-                   #chat_id = bot.get_chat(int(chatdb[str(d.id)]))
-                   """
-                   all_messages = client.get_messages(d.id, limit = d.unread_count)
-                   limite = 2
-                   for message in all_messages:
-                       if limite>=0:
-                          if hasattr(message.sender,'first_name'):
-                             replies.add(text = str(message.sender.first_name)+":\n"+str(message.message), chat = chat_id)                    
-                          else: 
-                             replies.add(text = str(message.message), chat = chat_id)
-                          #message.mark_read()
-                          limite-=1
-                       else:
-                          replies.add(text = str(d.unread_count-2-limite)+" sin leer de "+ttitle+"\n/more", chat = chat_id)
-                          break
-                   """
+                   chatdb[message.get_sender_contact().addr][str(d.id)] = str(chat_id.get_color())
                    if d.unread_count == 0:
                       replies.add(text = "Estas al día con "+ttitle+".\n/more", chat = chat_id)
                    else:
                       replies.add(text = "Tienes "+str(d.unread_count)+" mensajes sin leer de "+ttitle+"\n/more", chat = chat_id)
                 if chats_limit<=0:
                    break
-            tf = open('chatdb.json', 'w')
-            json.dump(chatdb, tf)
+            tf = open(message.get_sender_contact().addr+'.json', 'w')
+            json.dump(chatdb[message.get_sender_contact().addr], tf)
             tf.close()
-            client.edit_message('me',client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id),'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = 'chatdb.json')
+            client.edit_message('me',client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id),'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = message.get_sender_contact().addr+'.json')
             client.disconnect()
             #time.sleep(1)
             replies.add(text='Se agregaron '+str(5-chats_limit)+' chats a la lista!')
     except:
        code = str(sys.exc_info())
        replies.add(text=code)
-
-def load_chat_messages(message, replies):
-    """Load more messages from telegram in a chat"""
-    if str(message.chat.id) in chatdb.values():
-       for (key, value) in chatdb.items():
-           if value == str(message.chat.id):
+        
+def down_media(message, replies, payload):
+    """Download media message from telegram in a chat"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
+    if str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():
+       for (key, value) in chatdb[message.get_sender_contact().addr].items():
+           if value == str(message.chat.get_color()):
                try:
                   loop = asyncio.new_event_loop()
                   asyncio.set_event_loop(loop)
-                  with TelegramClient(StringSession(login_hash), api_id, api_hash) as client:  
+                  with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:  
+                       client.get_dialogs()
+                       tchat = client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
+                       ttitle = 'Unknown'
+                       if hasattr(tchat,'chats') and tchat.chats:
+                          ttitle = tchat.chats[0].title
+                       all_messages = client.get_messages(int(key), ids = [int(payload)])
+                       for m in all_messages:
+                           if True:                       
+                              mquote = ''
+                              file_attach = 'archivo'
+                              if hasattr(m,'reply_to'):
+                                 if hasattr(m.reply_to,'reply_to_msg_id'):
+                                    if client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0]:
+                                       mquote = '"'+client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0].text+'"\n'
+                              if hasattr(m.sender,'first_name'):
+                                 send_by = str(m.sender.first_name)+":\n"
+                              else:
+                                 send_by = ""
+                              if hasattr(m,'document') and m.document:
+                                 if m.document.size<20971520:
+                                    file_attach = client.download_media(m.document)
+                                    replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                                 else:
+                                    if hasattr(m.document,'attributes') and m.document.attributes:
+                                       if hasattr(m.document.attributes[0],'file_name'):
+                                          file_attach = m.document.attributes[0].file_name
+                                       if hasattr(m.document.attributes[0],'title'):
+                                          file_attach = m.document.attributes[0].title
+                                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                              if hasattr(m,'media') and m.media:
+                                 if hasattr(m.media,'photo'):
+                                    if m.media.photo.sizes[1].size<20971520:
+                                       file_attach = client.download_media(m.media)
+                                       replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                                    else:
+                                       replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))                      
+                              print('Descargando mensaje '+str(m.id))
+                           else:
+                              break
+                       client.disconnect()
+               except:
+                  code = str(sys.exc_info())
+                  replies.add(text=code)
+               break
+    else:
+       replies.add(text='Este no es un chat de telegram')    
+
+def load_chat_messages(message, replies):
+    """Load more messages from telegram in a chat"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
+    if str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():
+       for (key, value) in chatdb[message.get_sender_contact().addr].items():
+           if value == str(message.chat.get_color()):
+               try:
+                  loop = asyncio.new_event_loop()
+                  asyncio.set_event_loop(loop)
+                  with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:  
                        #change limit to unread then send only 10 messages
                        client.get_dialogs()
                        tchat = client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
@@ -209,10 +283,14 @@ def load_chat_messages(message, replies):
                        for m in all_messages:
                            if limite>=0:                       
                               mquote = ''
+                              mservice = ''
+                              file_attach = 'archivo'
                               if hasattr(m,'reply_to'):
                                  if hasattr(m.reply_to,'reply_to_msg_id'):
                                     if client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0]:
                                        mquote = '"'+client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0].text+'"\n'
+                              if hasattr(m,'action') and m.action:
+                                    mservice = '_system message_'
                               if hasattr(m.sender,'first_name'):
                                  send_by = str(m.sender.first_name)+":\n"
                               else:
@@ -223,7 +301,12 @@ def load_chat_messages(message, replies):
                                     file_attach = client.download_media(m.document)
                                     replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
                                  else:
-                                    replies.add(text = send_by+str(m.message)+"\nadjunto de "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                                    if hasattr(m.document,'attributes') and m.document.attributes:
+                                       if hasattr(m.document.attributes[0],'file_name'):
+                                          file_attach = m.document.attributes[0].file_name
+                                       if hasattr(m.document.attributes[0],'title'):
+                                          file_attach = m.document.attributes[0].title
+                                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
                                  no_media = False
                               if hasattr(m,'media') and m.media:
                                  if hasattr(m.media,'photo'):
@@ -231,13 +314,13 @@ def load_chat_messages(message, replies):
                                        file_attach = client.download_media(m.media)
                                        replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
                                     else:
-                                       replies.add(text = send_by+str(m.message)+"\nadjunto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
+                                       replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
                                     no_media = False
                                  if hasattr(m.media,'webpage'):
                                     replies.add(text = send_by+str(m.media.webpage.title)+"\n"+str(m.media.webpage.url))
                                     no_media = False
                               if no_media:
-                                 replies.add(text = mquote+send_by+str(m.message))                    
+                                 replies.add(text = mservice+mquote+send_by+str(m.message))                    
                               m.mark_read()
                               print('Leyendo mensaje '+str(m.id))
                               #client.send_read_acknowledge(entity=int(key), message=m)
@@ -270,13 +353,18 @@ def echo(payload, replies):
 @simplebot.filter
 def echo_filter(message, replies):
     """Write direct in chat with T upper title to write a telegram chat"""
-    if str(message.chat.id) in chatdb.values():
-       for (key, value) in chatdb.items():
-           if value == str(message.chat.id):
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
+    if str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():
+       for (key, value) in chatdb[message.get_sender_contact().addr].items():
+           if value == str(message.chat.get_color()):
                try:
                   loop = asyncio.new_event_loop()
                   asyncio.set_event_loop(loop)      
-                  with TelegramClient(StringSession(login_hash), api_id, api_hash) as client:
+                  with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
                        #chat_id = client(functions.messages.GetPeerDialogsRequest(peers=[int(key)]))
                        client.get_dialogs()
                        if message.filename:
@@ -292,10 +380,8 @@ def echo_filter(message, replies):
                   replies.add(text=code)
     else:
        replies.add(text='Este chat no está vinculado a telegram')
-    #replies.add(text = 'Escribes desde un chat de telegram')
 
 
-#@simplebot.command(admin=True)
 def eval_func(bot: DeltaBot, payload, replies, message: Message):
     """eval and back result. Example: /eval 2+2"""
     try:
@@ -304,20 +390,23 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
        code = str(sys.exc_info())
     replies.add(text=code or "echo")
 
-#@simplebot.command(admin=True)
 def start_updater(bot: DeltaBot, payload, replies, message: Message):
     """run schedule updater to get telegram messages. /start"""
     scheduler = BackgroundScheduler()
     scheduler.add_job(job, "interval", seconds=10)
     scheduler.start()
 
-#@simplebot.command(admin=True)
-def c_run(payload, replies):
+def c_run(payload, replies, message):
     """Run command inside a TelegramClient. Example: /c client.get_me()"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       load_delta_chats(message = message, replies = replies)
     try:
        loop = asyncio.new_event_loop()
        asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(login_hash), api_id, api_hash) as client:
+       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
             client.get_dialogs()
             code = str(eval(payload))
             if replies: 
@@ -336,25 +425,39 @@ def sizeof_fmt(num: float) -> str:
         if abs(num) < 1024.0:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
-    return "%.1f%s%s" % (num, "Yi", suffix)            
+    return "%.1f%s%s" % (num, "Yi", suffix)
 
-
-try:
-    c_run(payload = "client.download_media(client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id))", replies=None)
-    if os.path.isfile('chatdb.json'):
-       tf = open('chatdb.json','r')
-       chatdb=json.load(tf)
+def load_delta_chats(message, replies):
+    """Load chats from Telegram saved messages"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión!')
+       return
+    try:
+       loop = asyncio.new_event_loop()
+       asyncio.set_event_loop(loop)
+       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
+            client.get_dialogs()
+            client.download_media(client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id))
+            client.disconnect()
+       if os.path.isfile(message.get_sender_contact().addr+'.json'):
+          tf = open(message.get_sender_contact().addr+'.json','r')
+          chatdb[message.get_sender_contact().addr]=json.load(tf)
+          tf.close()
+       else:
+          tf = open(message.get_sender_contact().addr+'.json', 'w')
+          chatdb[message.get_sender_contact().addr] = {}
+          json.dump(chatdb[message.get_sender_contact().addr], tf)
+          tf.close()
+          client.pin_message('me',client.send_file('me', message.get_sender_contact().addr+'.json'))
+    except:
+       tf = open(message.get_sender_contact().addr+'.json', 'w')
+       chatdb[message.get_sender_contact().addr] = {}
+       json.dump(chatdb[message.get_sender_contact().addr], tf)
        tf.close()
-    else:
-       tf = open('chatdb.json', 'w')
-       json.dump(chatdb, tf)
-       tf.close()
-       c_run(payload = "client.pin_message('me',client.send_file('me', 'chatdb.json'))", replies=None) 
-except:
-    tf = open('chatdb.json', 'w')
-    json.dump(chatdb, tf)
-    tf.close()
-    c_run(payload = "client.pin_message('me',client.send_file('me', 'chatdb.json'))", replies=None) 
+       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
+            client.get_dialogs()
+            client.pin_message('me',client.send_file('me', message.get_sender_contact().addr+'.json'))
+            client.disconnect()            
 
 
 class TestEcho:
