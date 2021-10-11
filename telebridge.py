@@ -60,6 +60,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/sms" ,func = login_code)
     bot.commands.register(name = "/pass" ,func = login_2fa)
     bot.commands.register(name = "/token" ,func = login_session)
+    bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = down_media)
     
@@ -96,6 +97,13 @@ def remove_chat(payload, replies, message):
        if replies:
           replies.add(text=code)
             
+def logout_tg(payload, replies, message):
+    """Logout from Telegram and delete the token session for the bot"""
+    if message.get_sender_contact().addr in logindb:
+       del logindb[message.get_sender_contact().addr]
+       replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
+    else:
+       replies.add(text = 'Actualmente no está logueado en el puente')
                                    
 def login_num(payload, replies, message):
     """Start session in Telegram. Example: /login +5312345678"""
