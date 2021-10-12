@@ -23,9 +23,7 @@ import time
 import json
 from datetime import datetime
 
-
-
-version = "0.1.2"
+version = "0.1.3"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -57,13 +55,30 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/more" ,func = load_chat_messages)
     bot.commands.register(name = "/load" ,func = updater)
     bot.commands.register(name = "/exec" ,func = async_run, admin = True)
-    bot.commands.register(name = "/login" ,func = login_num)
-    bot.commands.register(name = "/sms" ,func = login_code)
-    bot.commands.register(name = "/pass" ,func = login_2fa)
-    bot.commands.register(name = "/token" ,func = login_session)
+    bot.commands.register(name = "/login" ,func = async_login_num)
+    bot.commands.register(name = "/sms" ,func = async_login_code)
+    bot.commands.register(name = "/pass" ,func = async_login_2fa)
+    bot.commands.register(name = "/token" ,func = async_login_session)
     bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = down_media)
+
+async def save_delta_chats(payload, replies, message):
+    try:
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       tf = open(message.get_sender_contact().addr+'.json', 'w')
+       json.dump(chatdb[message.get_sender_contact().addr], tf)
+       tf.close()
+       await client.connect()
+       my_id = await client(functions.users.GetFullUserRequest('me'))
+       my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)                                      
+       await client.edit_message('me',my_pin,'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = message.get_sender_contact().addr+'.json')
+       await client.disconnect()
+    except:
+       code = str(sys.exc_info())
+       print(code)
+       if replies:
+          replies.add(text=code)
     
 def remove_chat(payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
@@ -81,23 +96,13 @@ def remove_chat(payload, replies, message):
            if value == str(message.chat.get_color()):
               del chatdb[message.get_sender_contact().addr][key]
               replies.add(text = 'Se desvinculó el chat delta '+str(message.chat.id)+' con el chat telegram '+key)
+              break  
     else:
        replies.add(text = 'Este chat no está vinculado a telegram')
-    try:
-       loop = asyncio.new_event_loop()
-       asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
-            tf = open(message.get_sender_contact().addr+'.json', 'w')
-            json.dump(chatdb[message.get_sender_contact().addr], tf)
-            tf.close()
-            client.edit_message('me',client.get_messages('me', ids=client(functions.users.GetFullUserRequest('me')).pinned_msg_id),'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = message.get_sender_contact().addr+'.json')
-            client.disconnect()
-    except:
-       code = str(sys.exc_info())
-       print(code)
-       if replies:
-          replies.add(text=code)
+       return
+    loop.run_until_complete(save_delta_chats(payload, replies, message))
             
+        
 def logout_tg(payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
@@ -106,14 +111,11 @@ def logout_tg(payload, replies, message):
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
                                    
-def login_num(payload, replies, message):
-    """Start session in Telegram. Example: /login +5312345678"""
+async def login_num(payload, replies, message):
     try:
-       loop = asyncio.new_event_loop()
-       asyncio.set_event_loop(loop)
-       clientdb[message.get_sender_contact().addr] = TelegramClient(StringSession(), api_id, api_hash)
-       clientdb[message.get_sender_contact().addr].connect()
-       me = clientdb[message.get_sender_contact().addr].send_code_request(payload)
+       clientdb[message.get_sender_contact().addr] = TC(StringSession(), api_id, api_hash)
+       await clientdb[message.get_sender_contact().addr].connect()
+       me = await clientdb[message.get_sender_contact().addr].send_code_request(payload)
        hashdb[message.get_sender_contact().addr] = me.phone_code_hash
        phonedb[message.get_sender_contact().addr] = payload
        replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', por favor introdusca /sms CODIGO para iniciar')
@@ -122,16 +124,19 @@ def login_num(payload, replies, message):
        print(code)
        if replies:
           replies.add(text=code)
+
+def async_login_num(payload, replies, message):
+    """Start session in Telegram. Example: /login +5312345678"""
+    loop.run_until_complete(login_num(payload, replies, message))
             
-def login_code(payload, replies, message):
-    """Confirm session in Telegram. Example: /sms 12345"""
+async def login_code(payload, replies, message):   
     try:
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb:
           try:
-              me = clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)               
+              me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)               
               logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
               replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
-              clientdb[message.get_sender_contact().addr].disconnect()
+              await clientdb[message.get_sender_contact().addr].disconnect()
               del clientdb[message.get_sender_contact().addr]
           except SessionPasswordNeededError:
               smsdb[message.get_sender_contact().addr]=payload
@@ -143,15 +148,18 @@ def login_code(payload, replies, message):
        print(code)
        if replies:
           replies.add(text=code)
+
+def async_login_code(payload, replies, message):
+    """Confirm session in Telegram. Example: /sms 12345"""
+    loop.run_until_complete(login_code(payload, replies, message))
             
-def login_2fa(payload, replies, message):
-    """Confirm session in Telegram with 2FA. Example: /pass PASSWORD"""
+async def login_2fa(payload, replies, message):   
     try:
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
-          me = clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)               
+          me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)               
           logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
           replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este')         
-          clientdb[message.get_sender_contact().addr].disconnect()
+          await clientdb[message.get_sender_contact().addr].disconnect()
           del clientdb[message.get_sender_contact().addr]
           del smsdb[message.get_sender_contact().addr]  
        else:
@@ -164,24 +172,32 @@ def login_2fa(payload, replies, message):
        code = str(sys.exc_info())
        print(code)
        if replies:
-          replies.add(text=code)            
+          replies.add(text=code)
+
+def async_login_2fa(payload, replies, message):
+    """Confirm session in Telegram with 2FA. Example: /pass PASSWORD"""
+    loop.run_until_complete(login_2fa(payload, replies, message))        
             
-def login_session(payload, replies, message):
-    """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
+async def login_session(payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
        try:
-          loop = asyncio.new_event_loop()
-          asyncio.set_event_loop(loop)
-          with TelegramClient(StringSession(payload), api_id, api_hash) as client:
-               replies.add(text='Ah iniciado sesión correctamente '+str(client.get_me().first_name))
-               logindb[message.get_sender_contact().addr] = payload
-               client.disconnect()
+           client = TC(StringSession(payload), api_id, api_hash)
+           await client.connect()
+           my = await client.get_me()
+           nombre = my.first_name
+           await client.disconnect()
+           replies.add(text='Ah iniciado sesión correctamente '+str(nombre))
+           logindb[message.get_sender_contact().addr] = payload           
        except:
           code = str(sys.exc_info())
           print(code)
           replies.add(text='Error al iniciar sessión:\n'+code)
     else:
        replies.add(text='Su token es:\n\n'+logindb[message.get_sender_contact().addr]) 
+
+def async_login_session(payload, replies, message):
+    """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
+    loop.run_until_complete(login_session(payload, replies, message))
 
 def updater(bot, payload, replies, message):
     """Load chats from telegram. Example: /load
@@ -504,15 +520,7 @@ def load_delta_chats(message, replies):
             client.get_dialogs()
             client.pin_message('me',client.send_file('me', message.get_sender_contact().addr+'.json'))
             client.disconnect()            
-"""
-try:
-    # run the event loop forever; ctrl+c to stop it
-    # we could also run the loop for three seconds:
-    #     loop.run_until_complete(asyncio.sleep(3))
-    loop.run_forever()
-except KeyboardInterrupt:
-    pass
-"""    
+
 
 class TestEcho:
     def test_echo(self, mocker):
@@ -530,4 +538,3 @@ class TestEcho:
         text = "testing echo filter in group"
         msg = mocker.get_one_reply(text, group="mockgroup", filters=__name__)
         assert msg.text == text
-
