@@ -5,6 +5,7 @@ import sys
 import os
 from telethon.sessions import StringSession
 from telethon.sync import TelegramClient
+from telethon import TelegramClient as TC
 #from telethon.events import StopPropagation
 from telethon.sync import functions
 from telethon.tl.functions.users import GetFullUserRequest
@@ -47,7 +48,7 @@ logindb = {}
 global chatdb
 chatdb = {}
 
-
+loop = asyncio.new_event_loop()
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
@@ -55,7 +56,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/more" ,func = load_chat_messages)
     bot.commands.register(name = "/load" ,func = updater)
-    bot.commands.register(name = "/exec" ,func = c_run, admin = True)
+    bot.commands.register(name = "/exec" ,func = async_run, admin = True)
     bot.commands.register(name = "/login" ,func = login_num)
     bot.commands.register(name = "/sms" ,func = login_code)
     bot.commands.register(name = "/pass" ,func = login_2fa)
@@ -68,7 +69,7 @@ def remove_chat(payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
        you can pass the all parametre to remove all chats like: /remove all"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para eliminar chats!')
        return
     if message.get_sender_contact().addr not in chatdb:
        load_delta_chats(message = message, replies = replies)
@@ -186,9 +187,9 @@ def updater(bot, payload, replies, message):
     """Load chats from telegram. Example: /load
     you can pass privates for load private only chats like: /load privates"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
        return
-    if message.get_sender_contact().addr not in chatdb:
+    if message.get_sender_contact().addr not in chatdb or len(chatdb[message.get_sender_contact().addr])<1:
        load_delta_chats(message = message, replies = replies)
     try:
        replies.add(text = 'Obteniedo chats...')
@@ -233,7 +234,7 @@ def updater(bot, payload, replies, message):
 def down_media(message, replies, payload):
     """Download media message from telegram in a chat"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para descargar medios!')
        return
     if message.get_sender_contact().addr not in chatdb:
        load_delta_chats(message = message, replies = replies)
@@ -294,7 +295,7 @@ def down_media(message, replies, payload):
 def load_chat_messages(message, replies):
     """Load more messages from telegram in a chat"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para cargar los mensajes!')
        return
     if message.get_sender_contact().addr not in chatdb:
        load_delta_chats(message = message, replies = replies)
@@ -393,7 +394,7 @@ def echo(payload, replies):
 def echo_filter(message, replies):
     """Write direct in chat with T upper title to write a telegram chat"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para enviar mensajes!')
        return
     if message.get_sender_contact().addr not in chatdb:
        load_delta_chats(message = message, replies = replies)
@@ -435,27 +436,33 @@ def start_updater(bot: DeltaBot, payload, replies, message: Message):
     scheduler.add_job(job, "interval", seconds=10)
     scheduler.start()
 
-def c_run(payload, replies, message):
+async def c_run(payload, replies, message):
     """Run command inside a TelegramClient. Example: /c client.get_me()"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para ejecutar comandos!')
        return
     if message.get_sender_contact().addr not in chatdb:
        load_delta_chats(message = message, replies = replies)
     try:
-       loop = asyncio.new_event_loop()
-       asyncio.set_event_loop(loop)
-       with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:
-            client.get_dialogs()
-            code = str(eval(payload))
-            if replies: 
-               replies.add(text = code)
-            client.disconnect()
+       #loop = asyncio.new_event_loop()
+       #asyncio.set_event_loop(loop)
+       replies.add(text='Ejecutando...')
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect() 
+       await client.get_dialogs()
+       code = str(await eval(payload))
+       if replies: 
+          replies.add(text = code)
+       await client.disconnect()
     except:
        code = str(sys.exc_info())
        print(code)
        if replies:
           replies.add(text=code or "echo")
+            
+def async_run(payload, replies, message):
+    """Run command inside a TelegramClient. Example: /c client.get_me()"""
+    loop.run_until_complete(c_run(payload, replies, message))  
             
 def sizeof_fmt(num: float) -> str:
     """Format size in human redable form."""
@@ -469,7 +476,7 @@ def sizeof_fmt(num: float) -> str:
 def load_delta_chats(message, replies):
     """Load chats from Telegram saved messages"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión!')
+       replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
        return
     try:
        loop = asyncio.new_event_loop()
@@ -497,7 +504,15 @@ def load_delta_chats(message, replies):
             client.get_dialogs()
             client.pin_message('me',client.send_file('me', message.get_sender_contact().addr+'.json'))
             client.disconnect()            
-
+"""
+try:
+    # run the event loop forever; ctrl+c to stop it
+    # we could also run the loop for three seconds:
+    #     loop.run_until_complete(asyncio.sleep(3))
+    loop.run_forever()
+except KeyboardInterrupt:
+    pass
+"""    
 
 class TestEcho:
     def test_echo(self, mocker):
@@ -515,3 +530,4 @@ class TestEcho:
         text = "testing echo filter in group"
         msg = mocker.get_one_reply(text, group="mockgroup", filters=__name__)
         assert msg.text == text
+
