@@ -4,10 +4,8 @@ from deltachat import Chat, Contact, Message
 import sys
 import os
 from telethon.sessions import StringSession
-from telethon.sync import TelegramClient
 from telethon import TelegramClient as TC
-#from telethon.events import StopPropagation
-from telethon.sync import functions
+from telethon import functions
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.functions.channels import GetParticipantsRequest
@@ -50,9 +48,10 @@ loop = asyncio.new_event_loop()
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
+    bot.account.set_avatar('telegram.jpeg')
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
-    bot.commands.register(name = "/more" ,func = load_chat_messages)
+    bot.commands.register(name = "/more" ,func = async_load_chat_messages)
     bot.commands.register(name = "/load" ,func = async_updater)
     bot.commands.register(name = "/exec" ,func = async_run, admin = True)
     bot.commands.register(name = "/login" ,func = async_login_num)
@@ -61,7 +60,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/token" ,func = async_login_session)
     bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
-    bot.commands.register(name = "/down" ,func = down_media)
+    bot.commands.register(name = "/down" ,func = async_down_media)
 
 async def save_delta_chats(replies, message):
     """This is for save the chats deltachat/telegram in Telegram Saved message user"""
@@ -87,6 +86,29 @@ async def save_delta_chats(replies, message):
 
 def async_save_delta_chats(replies, message):
     loop.run_until_complete(save_delta_chats(replies, message))
+
+async def load_delta_chats(message, replies):
+    """This is for load the chats deltachat/telegram from Telegram saved message user"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
+       return
+    try:
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       my_id = await client(functions.users.GetFullUserRequest('me'))
+       my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)
+       await client.download_media(my_pin)
+       if os.path.isfile(message.get_sender_contact().addr+'.json'):
+          tf = open(message.get_sender_contact().addr+'.json','r')
+          chatdb[message.get_sender_contact().addr]=json.load(tf)
+          tf.close()
+       await client.disconnect()
+    except:
+       print('Error loading delta chats')
+
+def async_load_delta_chats(message, replies):
+    loop.run_until_complete(load_delta_chats(message, replies))
     
 def remove_chat(payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
@@ -258,8 +280,7 @@ def async_updater(bot, payload, replies, message):
     if message.get_sender_contact().addr in logindb:
        async_save_delta_chats(replies = replies, message = message)
         
-def down_media(message, replies, payload):
-    """Download media message from telegram in a chat"""
+async def down_media(message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para descargar medios!')
        return
@@ -267,58 +288,61 @@ def down_media(message, replies, payload):
        for (key, value) in chatdb[message.get_sender_contact().addr].items():
            if value == str(message.chat.get_color()):
                try:
-                  loop = asyncio.new_event_loop()
-                  asyncio.set_event_loop(loop)
-                  with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:  
-                       client.get_dialogs()
-                       tchat = client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
-                       ttitle = 'Unknown'
-                       if hasattr(tchat,'chats') and tchat.chats:
-                          ttitle = tchat.chats[0].title
-                       all_messages = client.get_messages(int(key), ids = [int(payload)])
-                       for m in all_messages:
-                           if True:                       
-                              mquote = ''
-                              file_attach = 'archivo'
-                              if hasattr(m,'reply_to'):
-                                 if hasattr(m.reply_to,'reply_to_msg_id'):
-                                    if client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0]:
-                                       mquote = '"'+client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0].text+'"\n'
-                              if hasattr(m.sender,'first_name'):
-                                 send_by = str(m.sender.first_name)+":\n"
-                              else:
-                                 send_by = ""
-                              if hasattr(m,'document') and m.document:
-                                 if m.document.size<20971520:
-                                    file_attach = client.download_media(m.document)
-                                    replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
-                                 else:
-                                    if hasattr(m.document,'attributes') and m.document.attributes:
-                                       if hasattr(m.document.attributes[0],'file_name'):
-                                          file_attach = m.document.attributes[0].file_name
-                                       if hasattr(m.document.attributes[0],'title'):
-                                          file_attach = m.document.attributes[0].title
-                                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
-                              if hasattr(m,'media') and m.media:
-                                 if hasattr(m.media,'photo'):
-                                    if m.media.photo.sizes[1].size<20971520:
-                                       file_attach = client.download_media(m.media)
-                                       replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
-                                    else:
-                                       replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))                      
-                              print('Descargando mensaje '+str(m.id))
-                           else:
-                              break
-                       client.disconnect()
+                  client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+                  await client.connect()
+                  await client.get_dialogs()
+                  tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
+                  ttitle = 'Unknown'
+                  if hasattr(tchat,'chats') and tchat.chats:
+                     ttitle = tchat.chats[0].title
+                  all_messages = await client.get_messages(int(key), ids = [int(payload)])
+                  for m in all_messages:
+                      if True:
+                         mquote = ''
+                         file_attach = 'archivo'
+                         if hasattr(m,'reply_to'):
+                            if hasattr(m.reply_to,'reply_to_msg_id'):
+                               mensaje = await client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])
+                               if mensaje:
+                                  mquote = '"'+str(mensaje[0].text)+'"\n'
+                         if hasattr(m.sender,'first_name'):
+                            send_by = str(m.sender.first_name)+":\n"
+                         else:
+                            send_by = ""
+                         if hasattr(m,'document') and m.document:
+                            if m.document.size<20971520:
+                               file_attach = await client.download_media(m.document)
+                               replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                            else:
+                               if hasattr(m.document,'attributes') and m.document.attributes:
+                                  if hasattr(m.document.attributes[0],'file_name'):
+                                     file_attach = m.document.attributes[0].file_name
+                                  if hasattr(m.document.attributes[0],'title'):
+                                     file_attach = m.document.attributes[0].title
+                               replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                         if hasattr(m,'media') and m.media:
+                            if hasattr(m.media,'photo'):
+                               if m.media.photo.sizes[1].size<20971520:
+                                  file_attach = await client.download_media(m.media)
+                                  replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                               else:
+                                  replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
+                         print('Descargando mensaje '+str(m.id))
+                      else:
+                         break
+                  await client.disconnect()
                except:
                   code = str(sys.exc_info())
                   replies.add(text=code)
                break
     else:
-       replies.add(text='Este no es un chat de telegram')    
+       replies.add(text='Este no es un chat de telegram')
 
-def load_chat_messages(message, replies):
-    """Load more messages from telegram in a chat"""
+def async_down_media(message, replies, payload):
+    """Download media message from telegram in a chat"""
+    loop.run_until_complete(down_media(message, replies, payload))
+
+async def load_chat_messages(message, replies):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para cargar los mensajes!')
        return
@@ -326,82 +350,83 @@ def load_chat_messages(message, replies):
        for (key, value) in chatdb[message.get_sender_contact().addr].items():
            if value == str(message.chat.get_color()):
                try:
-                  loop = asyncio.new_event_loop()
-                  asyncio.set_event_loop(loop)
-                  with TelegramClient(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash) as client:  
-                       #change limit to unread then send only 10 messages
-                       client.get_dialogs()
-                       tchat = client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
-                       ttitle = 'Unknown'
-                       if hasattr(tchat,'chats') and tchat.chats:
-                          ttitle = tchat.chats[0].title
-                       #else:
-                       #   if hasattr(tchat,'users'):
-                       #      ttitle = tchat.users[0].first_name
-                       sin_leer = tchat.dialogs[0].unread_count
-                       limite = 5
-                       all_messages = client.get_messages(int(key), limit = sin_leer)
-                       if sin_leer>0:
-                          all_messages.reverse()
-                       for m in all_messages:
-                           if limite>=0:                       
-                              mquote = ''
-                              mservice = ''
-                              file_attach = 'archivo'
-                              if hasattr(m,'reply_to'):
-                                 if hasattr(m.reply_to,'reply_to_msg_id'):
-                                    if client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0]:
-                                       mquote = '"'+client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])[0].text+'"\n'
-                              if hasattr(m,'action') and m.action:
-                                    mservice = '_system message_'
-                              if hasattr(m.sender,'first_name'):
-                                 send_by = str(m.sender.first_name)+":\n"
-                              else:
-                                 send_by = ""
-                              no_media = True
-                              if hasattr(m,'document') and m.document:
-                                 if m.document.size<512000:
-                                    file_attach = client.download_media(m.document)
-                                    replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
-                                 else:
-                                    if hasattr(m.document,'attributes') and m.document.attributes:
-                                       if hasattr(m.document.attributes[0],'file_name'):
-                                          file_attach = m.document.attributes[0].file_name
-                                       if hasattr(m.document.attributes[0],'title'):
-                                          file_attach = m.document.attributes[0].title
-                                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
-                                 no_media = False
-                              if hasattr(m,'media') and m.media:
-                                 if hasattr(m.media,'photo'):
-                                    if m.media.photo.sizes[1].size<512000:
-                                       file_attach = client.download_media(m.media)
-                                       replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
-                                    else:
-                                       replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
-                                    no_media = False
-                                 if hasattr(m.media,'webpage'):
-                                    replies.add(text = send_by+str(m.media.webpage.title)+"\n"+str(m.media.webpage.url))
-                                    no_media = False
-                              if no_media:
-                                 replies.add(text = mservice+mquote+send_by+str(m.message))                    
-                              m.mark_read()
-                              print('Leyendo mensaje '+str(m.id))
-                              #client.send_read_acknowledge(entity=int(key), message=m)
-                           else:
-                              #time.sleep(1)
-                              replies.add(text = "Tienes "+str(sin_leer-2-5-limite)+" mensajes sin leer de "+ttitle+"\n/more")
-                              break
-                           limite-=1 
-                       if sin_leer-limite<=0:
-                          #time.sleep(1)
-                          replies.add(text = "Estas al día con "+ttitle+"\n/more")
-                       client.disconnect()
+                  client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+                  await client.connect()
+                  await client.get_dialogs()
+                  tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[int(key)] ))
+                  ttitle = 'Unknown'
+                  if hasattr(tchat,'chats') and tchat.chats:
+                     ttitle = tchat.chats[0].title
+                  else:
+                     if hasattr(tchat,'users') and tchat.users:
+                        ttitle = tchat.users[0].first_name
+                  sin_leer = tchat.dialogs[0].unread_count
+                  limite = 5
+                  all_messages = await client.get_messages(int(key), limit = sin_leer)
+                  if sin_leer>0:
+                     all_messages.reverse()
+                  for m in all_messages:
+                      if limite>=0:
+                         mquote = ''
+                         mservice = ''
+                         file_attach = 'archivo'
+                         if hasattr(m,'reply_to'):
+                            if hasattr(m.reply_to,'reply_to_msg_id'):
+                               mensaje = await client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])
+                               if mensaje:
+                                  mquote = '"'+str(mensaje[0].text)+'"\n'
+                         if hasattr(m,'action') and m.action:
+                            mservice = '_system message_'
+                         if hasattr(m.sender,'first_name') and m.sender.first_name:
+                            send_by = str(m.sender.first_name)+":\n"
+                         else:
+                            send_by = ""
+                         no_media = True
+                         if hasattr(m,'document') and m.document:
+                            if m.document.size<512000:
+                               file_attach = await client.download_media(m.document)
+                               replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                            else:
+                               if hasattr(m.document,'attributes') and m.document.attributes:
+                                  if hasattr(m.document.attributes[0],'file_name'):
+                                     file_attach = m.document.attributes[0].file_name
+                                  if hasattr(m.document.attributes[0],'title'):
+                                     file_attach = m.document.attributes[0].title
+                               replies.add(text = send_by+str(m.message)+"\n"+str(file_attach)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                            no_media = False
+                         if hasattr(m,'media') and m.media:
+                            if hasattr(m.media,'photo'):
+                               if m.media.photo.sizes[1].size<512000:
+                                  file_attach = await client.download_media(m.media)
+                                  replies.add(text = send_by+str(file_attach)+"\n"+str(m.message), filename = file_attach)
+                               else:
+                                  replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
+                               no_media = False
+                            if hasattr(m.media,'webpage'):
+                               replies.add(text = send_by+str(m.media.webpage.title)+"\n"+str(m.media.webpage.url))
+                               no_media = False
+                         if no_media:
+                            replies.add(text = mservice+mquote+send_by+str(m.message))
+                         await m.mark_read()
+                         print('Leyendo mensaje '+str(m.id))
+                         #client.send_read_acknowledge(entity=int(key), message=m)
+                      else:
+                         replies.add(text = "Tienes "+str(sin_leer-2-5-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more")
+                         break
+                      limite-=1
+                  if sin_leer-limite<=0:
+                     replies.add(text = "Estas al día con "+str(ttitle)+"\n/more")
+                  await client.disconnect()
                except:
                   code = str(sys.exc_info())
                   replies.add(text=code)
                break
     else:
        replies.add(text='Este no es un chat de telegram')
+
+def async_load_chat_messages(message, replies):
+    """Load more messages from telegram in a chat"""
+    loop.run_until_complete(load_chat_messages(message, replies))
 
 def job():
     print("do the job")
@@ -416,9 +441,9 @@ def echo(payload, replies):
 async def echo_filter(message, replies):
     """Write direct in chat with T upper title to write a telegram chat"""
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión para enviar mensajes!')
+       replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
-    if str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():
+    if message.get_sender_contact().addr in chatdb and str(message.chat.get_color()) in chatdb[message.get_sender_contact().addr].values():
        for (key, value) in chatdb[message.get_sender_contact().addr].items():
            if value == str(message.chat.get_color()):
                try:                  
@@ -491,29 +516,6 @@ def sizeof_fmt(num: float) -> str:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.1f%s%s" % (num, "Yi", suffix)
-
-async def load_delta_chats(message, replies):
-    """This is for load the chats deltachat/telegram from Telegram saved message user"""
-    if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
-       return
-    try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)      
-       await client.connect()
-       await client.get_dialogs()
-       my_id = await client(functions.users.GetFullUserRequest('me'))
-       my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)              
-       await client.download_media(my_pin)
-       if os.path.isfile(message.get_sender_contact().addr+'.json'):
-          tf = open(message.get_sender_contact().addr+'.json','r')
-          chatdb[message.get_sender_contact().addr]=json.load(tf)
-          tf.close()         
-       await client.disconnect()
-    except:
-       print('Error loading delta chats')
-
-def async_load_delta_chats(message, replies):
-    loop.run_until_complete(load_delta_chats(message, replies))
 
 class TestEcho:
     def test_echo(self, mocker):
