@@ -216,7 +216,7 @@ async def login_session(payload, replies, message):
            client = TC(StringSession(payload), api_id, api_hash)
            await client.connect()
            my = await client.get_me()
-           nombre = my.first_name
+           nombre = str(my.first_name)
            await client.disconnect()
            replies.add(text='Ah iniciado sesión correctamente '+str(nombre))
            logindb[message.get_sender_contact().addr] = payload                      
@@ -257,8 +257,11 @@ async def updater(bot, payload, replies, message):
            if str(d.id) not in chatdb[message.get_sender_contact().addr] and not private_only:
               chat_id = bot.create_group(ttitle, [contacto])
               img = await client.download_profile_photo(d.entity)
-              if img and os.path.exists(img): 
-                 chat_id.set_profile_image(img)
+              try:
+                 if img and os.path.exists(img): 
+                    chat_id.set_profile_image(img)
+              except:
+                 print('Error al poner foto del perfil al chat:\n'+str(img))
               chats_limit-=1
               chatdb[message.get_sender_contact().addr][str(d.id)] = str(chat_id.get_color())
               if d.unread_count == 0:
@@ -305,7 +308,7 @@ async def down_media(message, replies, payload):
                                mensaje = await client.get_messages(int(key), ids = [m.reply_to.reply_to_msg_id])
                                if mensaje:
                                   mquote = '"'+str(mensaje[0].text)+'"\n'
-                         if hasattr(m.sender,'first_name'):
+                         if hasattr(m.sender,'first_name') and m.sender.first_name:
                             send_by = str(m.sender.first_name)+":\n"
                          else:
                             send_by = ""
