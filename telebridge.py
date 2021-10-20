@@ -10,7 +10,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.functions.channels import GetParticipantsRequest
 from telethon.tl.functions.channels import JoinChannelRequest
-from telethon.tl.functions.messages import ImportChatInviteRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest, SendMessageRequest
 from telethon.tl.functions.contacts import ResolveUsernameRequest
 from telethon.tl.types import ChannelParticipantsSearch
 from telethon.tl.types import InputPeerEmpty
@@ -472,9 +472,20 @@ async def load_chat_messages(message, replies, payload):
                          #check if message is a reply
                          if m and hasattr(m,'reply_to'):
                             if hasattr(m.reply_to,'reply_to_msg_id'):
-                               mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
+                               mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])                               
                                if mensaje:
-                                  mquote = '"'+str(mensaje[0].text)+'"\n'
+                                  reply_text = ''  
+                                  if hasattr(mensaje[0],'sender') and mensaje[0].sender and hasattr(mensaje[0].sender,'first_name') and mensaje[0].sender.first_name:
+                                     reply_send_by = str(mensaje[0].sender.first_name)+": "
+                                  else:
+                                     reply_send_by = ""
+                                  if hasattr(mensaje[0],'media') and mensaje[0].media:
+                                     if hasattr(mensaje[0].media,'photo'):
+                                        reply_text += '[FOTO]'
+                                  if hasattr(mensaje[0],'document') and mensaje[0].document:
+                                     reply_text += '[ARCHIVO]'      
+                                  reply_text += str(mensaje[0].text)      
+                                  mquote = '>'+reply_send_by+reply_text+'\n\n'
                                 
                          #check if message is a system message       
                          if m and hasattr(m,'action') and m.action:
