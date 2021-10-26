@@ -1,8 +1,9 @@
-
 certifi==2018.11.29
 chardet==3.0.4
 Click==7.0
-Flask==1.0.2
+cryptg
+aiohttp
+hachoir
 idna==2.8
 itsdangerous==1.1.0
 Jinja2==2.10
@@ -17,3 +18,4 @@ git+git://github.com/Nenirey/Telethon@master#telethon
 simplebot
 apscheduler
 mock
+pylottie[all]
