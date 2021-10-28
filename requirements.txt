@@ -3,6 +3,7 @@ chardet==3.0.4
 Click==7.0
 cryptg
 aiohttp
+Flask
 hachoir
 idna==2.8
 itsdangerous==1.1.0
@@ -18,4 +19,6 @@ git+git://github.com/Nenirey/Telethon@master#telethon
 simplebot
 apscheduler
 mock
-pylottie[all]
+lottie
+pillow
+cairosvg
