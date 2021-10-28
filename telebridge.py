@@ -23,12 +23,17 @@ import time
 import json
 from datetime import datetime
 from threading import Thread
-#import pylottie
+#For telegram sticker stuff
+import lottie
+from lottie.importers import importers
+from lottie.exporters import exporters
+from lottie.utils.stripper import float_strip, heavy_strip
 
 version = "0.1.3"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
+
 
 global phonedb
 phonedb = {}
@@ -88,6 +93,32 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/auto" ,func = add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
+    
+    
+def print_dep_message(loader):
+    if not loader.failed_modules:
+        return
+
+    sys.stderr.write("Make sure you have the correct dependencies installed\n")
+
+    for failed, dep in loader.failed_modules.items():
+        sys.stderr.write("For %s install %s\n" % (failed, dep))
+
+async def convertsticker(infilepath,outfilepath):
+    importer = None
+    suf =  os.path.splitext(infilepath)[1][1:]
+    print(suf)
+    for p in importers:
+        if suf in p.extensions:
+           importer = p
+           break
+    exporter = exporters.get(os.path.splitext(outfilepath)[1][1:])
+    if not exporter:
+       print_dep_message(exporters)
+
+    an = importer.process(infilepath)
+    exporter.process(an, outfilepath)     
+    
 
 def list_chats(replies, message, payload):
     """Show your linked deltachat/telegram chats. Example /list"""
@@ -492,14 +523,16 @@ def async_click_button(bot, message, replies, payload):
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0]))
 
 async def load_chat_messages(bot, message = None, replies = Replies, payload = None, dc_contact = None, dc_id = None):
+    is_auto = False
     if message:
        contacto = message.get_sender_contact().addr
        dchat = message.chat.get_name()
        chat_id = bot.get_chat(message.chat)
     if dc_contact and dc_id:
-       contacto = dc_conatact
-       chat_id = bot.get_chat(dc_id)
+       contacto = dc_contact
+       chat_id = bot.get_chat(int(dc_id))
        dchat = chat_id.get_name()
+       is_auto = True
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
     if len(tg_ids)>0:
        id_chat=tg_ids[-1]
@@ -625,10 +658,12 @@ async def load_chat_messages(bot, message = None, replies = Replies, payload = N
               if m and hasattr(m,'document') and m.document:
                  if m.document.size<512000:
                     file_attach = await client.download_media(m.document, contacto)
-                    #if file_attach.find('.tgs')>0:
-                    #   file_attach_converted = file_attach.replace('.tgs','.webp')
-                    #   await pylottie.convertLottie2Webp(file_attach,file_attach_converted)
-                    #   replies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons, filename = file_attach_converted)
+                    #Convert all tgs sticker to png
+                    if file_attach.lower().endswith('.tgs'):
+                       filename, file_extension = os.path.splitext(file_attach)
+                       attach_converted = filename+'.png'
+                       await convertsticker(file_attach,attach_converted)
+                       file_attach = attach_converted
                     replies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach)
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -673,10 +708,10 @@ async def load_chat_messages(bot, message = None, replies = Replies, payload = N
               #client.send_read_acknowledge(entity=int(key), message=m)
               limite+=1
            else:
-              if not load_history:
+              if not load_history and not is_auto:
                  replies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)
               break
-       if sin_leer-limite<=0 and not load_history:
+       if sin_leer-limite<=0 and not load_history and not is_auto:
           replies.add(text = "Estas al día con "+str(ttitle)+"\n/more", chat = chat_id)
        if load_history:
           replies.add(text = "Cargar más mensajes:\n/more_-"+str(m_id), chat = chat_id)
@@ -863,10 +898,14 @@ async def inline_cmd(bot, message, replies, payload):
                        attach = await client.download_media(r.audio, contacto)
                  except:
                     print('Error descargando inline audio result')
-              #if attach.find('.tgs')>0:
-              #   attach_converted = attach.replace('.tgs','.webp')
-              #   await pylottie.convertLottie2Webp(attach,attach_converted)
-              #   replies.add(text = resultado, filename=attach_converted)
+                    
+              if attach.lower().endswith('.tgs'):
+                 filename, file_extension = os.path.splitext(attach)
+                 attach_converted = filename+'.png'
+                 await convertsticker(attach,attach_converted)
+                 attach = attach_converted   
+                 #replies.add(text = resultado, filename=attach_converted)
+                 
               replies.add(text = resultado, filename=attach)
               resultado+='\n\n'
               limite +=1
@@ -1045,16 +1084,21 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
        code = str(sys.exc_info())
     replies.add(text=code or "echo")
 
-async def auto_load():
+async def auto_load(bot):
     global messagedb
     while True:
         print('Ejecutando auto descargas...')
-        for (key, value) in messagedb:
-            print('Fake auto loads of '+str(key))
+        for (key, value) in messagedb.items():
+            print('Autodescarga de '+str(key)+' chat '+str(value))
+            try:
+               await load_chat_messages(bot = bot, message = None, replies = Replies, dc_contact = key, dc_id = value)
             #asyncio.run_coroutine_threadsafe(load_chat_messages(bot = DeltaBot, message = None, replies = Replies, dc_contact = key, dc_id = value),tloop)
+            except:
+               code = str(sys.exc_info())
+               print(code)
         await asyncio.sleep(10)
 
-def start_updater(bot: DeltaBot, payload, replies, message: Message):
+def start_updater(bot, payload, replies, message: Message):
     """Start scheduler updater to get telegram messages. /start"""
     is_done = True
     global auto_load_task
@@ -1065,7 +1109,7 @@ def start_updater(bot: DeltaBot, payload, replies, message: Message):
        else:
           is_done = False
     if is_done:
-       auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(),tloop)
+       auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot),tloop)
        replies.add(text='Las autodescargas se han iniciado!')
 
 def stop_updater(bot: DeltaBot, payload, replies, message: Message):
@@ -1112,6 +1156,7 @@ def sizeof_fmt(num: float) -> str:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.1f%s%s" % (num, "Yi", suffix)
+
 
 class TestEcho:
     def test_echo(self, mocker):
