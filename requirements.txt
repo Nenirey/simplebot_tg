@@ -3,7 +3,6 @@ chardet==3.0.4
 Click==7.0
 cryptg
 aiohttp
-Flask
 hachoir
 idna==2.8
 itsdangerous==1.1.0
