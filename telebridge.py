@@ -1170,7 +1170,7 @@ async def auto_load(bot, message, replies):
                print(code)
         await asyncio.sleep(15)
 
-def start_updater(bot, replies, message, replies):
+def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
     is_done = True
     global auto_load_task
