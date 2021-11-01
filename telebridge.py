@@ -619,7 +619,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                 last_name= tchat.users[0].last_name
              else:
                 last_name= ""
-             ttitle = (first_name + ' ' + last_name).strip()
+             if tchat.users[0].username:
+                user_name= "(@"+tchat.users[0].username+")"
+             else:
+                user_name= ""   
+             ttitle = (first_name + ' ' + last_name + ' ' + user_name).strip()
        sin_leer = tchat.dialogs[0].unread_count
        limite = 0
        load_history = False
