@@ -62,7 +62,6 @@ auto_load_task = None
 loop = asyncio.new_event_loop()
 
 def start_background_loop(bridge_initialized: Event) -> None:
-    #asyncio.set_event_loop(loop)
     global tloop
     tloop = asyncio.new_event_loop()
     bridge_initialized.set()
@@ -96,9 +95,6 @@ def deltabot_init(bot: DeltaBot) -> None:
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:    
-    #tloop = asyncio.new_event_loop()
-    #t = Thread(target=start_background_loop, args=(tloop,), daemon=True)
-    #t.start()
     bridge_init = Event()
     Thread(
         target=start_background_loop,
@@ -571,15 +567,15 @@ def async_click_button(bot, message, replies, payload):
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None):
     is_auto = False      
     if dc_contact and dc_id :
-       print(dc_id) 
+       #print(dc_id) 
        contacto = dc_contact
        chat_id = bot.get_chat(dc_id)
        dchat = chat_id.get_name()
        is_auto = True
        myreplies = Replies(bot, logger=bot.logger)
-       print(contacto)
+       #print(contacto)
        print(dchat)
-       print(str(chat_id))
+       #print(str(chat_id))
     else:
        contacto = message.get_sender_contact().addr
        dchat = message.chat.get_name()
@@ -602,8 +598,6 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
 
     try:      
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
-       if is_auto:
-          print('Conectando...')
        await client.connect()
        await client.get_dialogs()
        if id_chat.lstrip('-').isnumeric():
@@ -645,8 +639,6 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
        m_id = -0
-       if is_auto:
-          print('sin leer:'+str(sin_leer))
        for m in all_messages:
            if limite<5:
               mquote = ''
@@ -1198,7 +1190,6 @@ def stop_updater(bot: DeltaBot, payload, replies, message: Message):
        replies.add(text='Las autodescargas no fueron iniciadas!')
 
 async def c_run(payload, replies, message):
-    """Run command inside a TelegramClient. Example: /c client.get_me()"""
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ejecutar comandos!')
        return
@@ -1218,7 +1209,7 @@ async def c_run(payload, replies, message):
           replies.add(text=code or "echo")
 
 def async_run(payload, replies, message):
-    """Run command inside a TelegramClient. Example: /c client.get_me()"""
+    """Run command inside a async TelegramClient def. Note that all code run with await prefix, results are maybe a coorutine. Example: /exec client.get_me()"""
     loop.run_until_complete(c_run(payload, replies, message))
 
 def sizeof_fmt(num: float) -> str:
