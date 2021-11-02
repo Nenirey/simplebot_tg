@@ -70,6 +70,7 @@ def start_background_loop(bridge_initialized: Event) -> None:
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
     bot.account.set_avatar('telegram.jpeg')
+    bot.account.set_config("mdns_enabled","0")
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -91,7 +92,6 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/auto" ,func = async_add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
-    bot.account.set_config("mdns_enabled","0")
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:    
@@ -819,12 +819,21 @@ async def echo_filter(message, replies):
        else:
           target = id_chat
        if message.filename:
-          if message.filename.find('.aac')>0:
+          if message.is_audio()>0:
              await client.send_file(target, message.filename, voice_note=True)
           else:
-             await client.send_file(target, message.filename, caption = message.text)
+             if len(message.text) > 1024:
+                await client.send_file(target, message.filename, caption = message.text[0:1024])    
+                for x in range(1024, len(message.text), 1024):
+                    await client.send_message(target, message.text[x:x+1024])
+             else:       
+                await client.send_file(target, message.filename, caption = message.text)
        else:
-          await client.send_message(target,message.text)
+          if len(message.text) > 4096:
+             for x in range(0, len(message.text), 4096): 
+                 await client.send_message(target, message.text[x:x+4096])
+          else:
+             await client.send_message(target,message.text)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, message.text))
@@ -1152,15 +1161,11 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
 async def auto_load(bot, message, replies):
     global messagedb
     while True:
-        print('Ejecutando auto descargas...')
+        #print('Ejecutando auto descargas...')
         for (key, value) in messagedb.items():
             print('Autodescarga de '+str(key)+' chat '+str(value))
-            try:
-               #mainq.put((async_load_chat_messages(bot = bot, replies = replies, message = message, payload='', args = [key, value])))
-               #mainq.put((await load_chat_messages(bot = DeltaBot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)))
-               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)
-               #await load_chat_messages(bot = bot, replies = replies, dc_contact = key, dc_id = value)
-               #asyncio.run_coroutine_threadsafe(load_chat_messages(bot = bot, replies = replies, message = message, payload='', dc_contact = key, dc_id = value),tloop)
+            try:              
+               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)              
             except:
                code = str(sys.exc_info())
                print(code)
