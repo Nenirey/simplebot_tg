@@ -70,6 +70,7 @@ def start_background_loop(bridge_initialized: Event) -> None:
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
     bot.account.set_avatar('telegram.jpeg')
+    bot.account.set_config("mdns_enabled","0")
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -91,7 +92,6 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/auto" ,func = async_add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
-    bot.account.set_config("mdns_enabled","0")
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:    
@@ -102,6 +102,7 @@ def deltabot_start(bot: DeltaBot) -> None:
         daemon=True,
     ).start()
     bridge_init.wait()
+    auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
 
     
 def print_dep_message(loader):
@@ -126,7 +127,7 @@ async def convertsticker(infilepath,outfilepath):
        print_dep_message(exporters)
 
     an = importer.process(infilepath)
-    exporter.process(an, outfilepath)     
+    exporter.process(an, outfilepath, quality=5, skip_frames=30, dpi=5)     
     
 
 def list_chats(replies, message, payload):
@@ -506,7 +507,8 @@ async def down_media(message, replies, payload):
                           file_attach = m.document.attributes[0].file_name
                        if hasattr(m.document.attributes[0],'title'):
                           file_attach = m.document.attributes[0].title
-                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                    replies.add(text = "Solo se pueden descargar archivos de hasta 20MiB y este mide "+str(sizeof_fmt(m.document.size)))        
+                    #replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
               #check if message have a photo
               if hasattr(m,'media') and m.media:
                  if hasattr(m.media,'photo'):
@@ -651,6 +653,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               no_media = True
               html_buttons = ''
               msg_id = ''
+              tipo = None
               if m and show_id:
                  msg_id = '\n'+str(m.id)
               #check if message is a reply
@@ -677,6 +680,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        if hasattr(mensaje[0],'document') and mensaje[0].document:
                           reply_text += '[ARCHIVO]'
                        reply_text += str(mensaje[0].text)
+                       if len(reply_text)>60:
+                          reply_text = reply_text[0:60]+'...'
                        mquote = '>'+reply_send_by+reply_text+'\n\n'
               #check if message is a system message
               if m and hasattr(m,'action') and m.action:
@@ -713,14 +718,18 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
                     try:
+                       if file_attach.lower().endswith('.webp'):
+                          tipo = "sticker" 
                        if file_attach.lower().endswith('.tgs'):
                           filename, file_extension = os.path.splitext(file_attach)
-                          attach_converted = filename+'.png'
+                          attach_converted = filename+'.webp'
                           await convertsticker(file_attach,attach_converted)
                           file_attach = attach_converted
+                          tipo = "sticker"
+                            
                     except:
                        print('Error converting tgs file '+str(file_attach)) 
-                    myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                    myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        if hasattr(m.document.attributes[0],'file_name'):
@@ -819,12 +828,21 @@ async def echo_filter(message, replies):
        else:
           target = id_chat
        if message.filename:
-          if message.filename.find('.aac')>0:
+          if message.is_audio()>0:
              await client.send_file(target, message.filename, voice_note=True)
           else:
-             await client.send_file(target, message.filename, caption = message.text)
+             if len(message.text) > 1024:
+                await client.send_file(target, message.filename, caption = message.text[0:1024])    
+                for x in range(1024, len(message.text), 1024):
+                    await client.send_message(target, message.text[x:x+1024])
+             else:       
+                await client.send_file(target, message.filename, caption = message.text)
        else:
-          await client.send_message(target,message.text)
+          if len(message.text) > 4096:
+             for x in range(0, len(message.text), 4096): 
+                 await client.send_message(target, message.text[x:x+4096])
+          else:
+             await client.send_message(target,message.text)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, message.text))
@@ -917,10 +935,11 @@ async def inline_cmd(bot, message, replies, payload):
        else:
           results = await client.inline_query(bot = inline_bot, query = inline_search)
        resultado = ''
-
+       
        limite = 0
        for r in results:
            attach = ''
+           tipo = None
            if limite<5:
               if hasattr(r,'title') and r.title:
                  resultado+=str(r.title)+'\n'
@@ -963,15 +982,19 @@ async def inline_cmd(bot, message, replies, payload):
                        attach = await client.download_media(r.audio, contacto)
                  except:
                     print('Error descargando inline audio result')
-                    
-              if attach.lower().endswith('.tgs'):
-                 filename, file_extension = os.path.splitext(attach)
-                 attach_converted = filename+'.png'
-                 await convertsticker(attach,attach_converted)
-                 attach = attach_converted   
-                 #replies.add(text = resultado, filename=attach_converted)
-                 
-              replies.add(text = resultado, filename=attach)
+              try:
+                 if attach.lower().endswith('.webp'):
+                    tipo = 'sticker'    
+                 if attach.lower().endswith('.tgs'):
+                    filename, file_extension = os.path.splitext(attach)
+                    attach_converted = filename+'.webp'
+                    await convertsticker(attach,attach_converted)
+                    attach = attach_converted
+                    tipo = 'sticker'
+              except:
+                 print('error convirtiendo sticker')   
+                           
+              replies.add(text = resultado, filename=attach, viewtype=tipo)
               resultado+='\n\n'
               limite +=1
            else:
@@ -1152,15 +1175,11 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
 async def auto_load(bot, message, replies):
     global messagedb
     while True:
-        print('Ejecutando auto descargas...')
+        #print('Ejecutando auto descargas...')
         for (key, value) in messagedb.items():
             print('Autodescarga de '+str(key)+' chat '+str(value))
-            try:
-               #mainq.put((async_load_chat_messages(bot = bot, replies = replies, message = message, payload='', args = [key, value])))
-               #mainq.put((await load_chat_messages(bot = DeltaBot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)))
-               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)
-               #await load_chat_messages(bot = bot, replies = replies, dc_contact = key, dc_id = value)
-               #asyncio.run_coroutine_threadsafe(load_chat_messages(bot = bot, replies = replies, message = message, payload='', dc_contact = key, dc_id = value),tloop)
+            try:              
+               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)              
             except:
                code = str(sys.exc_info())
                print(code)
