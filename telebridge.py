@@ -651,6 +651,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               no_media = True
               html_buttons = ''
               msg_id = ''
+              tipo = None
               if m and show_id:
                  msg_id = '\n'+str(m.id)
               #check if message is a reply
@@ -677,6 +678,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        if hasattr(mensaje[0],'document') and mensaje[0].document:
                           reply_text += '[ARCHIVO]'
                        reply_text += str(mensaje[0].text)
+                       if len(reply_text)>60:
+                          reply_text = reply_text[0:60]+'...'
                        mquote = '>'+reply_send_by+reply_text+'\n\n'
               #check if message is a system message
               if m and hasattr(m,'action') and m.action:
@@ -718,9 +721,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           attach_converted = filename+'.png'
                           await convertsticker(file_attach,attach_converted)
                           file_attach = attach_converted
+                          tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach)) 
-                    myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                    myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        if hasattr(m.document.attributes[0],'file_name'):
@@ -926,10 +930,11 @@ async def inline_cmd(bot, message, replies, payload):
        else:
           results = await client.inline_query(bot = inline_bot, query = inline_search)
        resultado = ''
-
+       
        limite = 0
        for r in results:
            attach = ''
+           tipo = None
            if limite<5:
               if hasattr(r,'title') and r.title:
                  resultado+=str(r.title)+'\n'
@@ -972,15 +977,17 @@ async def inline_cmd(bot, message, replies, payload):
                        attach = await client.download_media(r.audio, contacto)
                  except:
                     print('Error descargando inline audio result')
-                    
-              if attach.lower().endswith('.tgs'):
-                 filename, file_extension = os.path.splitext(attach)
-                 attach_converted = filename+'.png'
-                 await convertsticker(attach,attach_converted)
-                 attach = attach_converted   
-                 #replies.add(text = resultado, filename=attach_converted)
-                 
-              replies.add(text = resultado, filename=attach)
+              try:      
+                 if attach.lower().endswith('.tgs'):
+                    filename, file_extension = os.path.splitext(attach)
+                    attach_converted = filename+'.png'
+                    await convertsticker(attach,attach_converted)
+                    attach = attach_converted
+                    tipo = 'sticker'
+              except:
+                 print('error convirtiendo sticker')   
+                           
+              replies.add(text = resultado, filename=attach, viewtype=tipo)
               resultado+='\n\n'
               limite +=1
            else:
