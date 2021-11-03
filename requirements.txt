@@ -16,6 +16,6 @@ schedule
 git+https://github.com/Nenirey/Telethon@master#telethon
 git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
-lottie
+git+https://gitlab.com/mattbas/python-lottie@master#lottie
 pillow
 cairosvg
