@@ -102,6 +102,7 @@ def deltabot_start(bot: DeltaBot) -> None:
         daemon=True,
     ).start()
     bridge_init.wait()
+    auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
 
     
 def print_dep_message(loader):
@@ -126,7 +127,7 @@ async def convertsticker(infilepath,outfilepath):
        print_dep_message(exporters)
 
     an = importer.process(infilepath)
-    exporter.process(an, outfilepath)     
+    exporter.process(an, outfilepath, quality=5, skip_frames=30, dpi=5)     
     
 
 def list_chats(replies, message, payload):
@@ -506,7 +507,8 @@ async def down_media(message, replies, payload):
                           file_attach = m.document.attributes[0].file_name
                        if hasattr(m.document.attributes[0],'title'):
                           file_attach = m.document.attributes[0].title
-                    replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
+                    replies.add(text = "Solo se pueden descargar archivos de hasta 20MiB y este mide "+str(sizeof_fmt(m.document.size)))        
+                    #replies.add(text = send_by+str(m.message)+"\n"+file_attach+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id))
               #check if message have a photo
               if hasattr(m,'media') and m.media:
                  if hasattr(m.media,'photo'):
@@ -716,12 +718,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
                     try:
+                       if file_attach.lower().endswith('.webp'):
+                          tipo = "sticker" 
                        if file_attach.lower().endswith('.tgs'):
                           filename, file_extension = os.path.splitext(file_attach)
-                          attach_converted = filename+'.png'
+                          attach_converted = filename+'.webp'
                           await convertsticker(file_attach,attach_converted)
                           file_attach = attach_converted
                           tipo = "sticker"
+                            
                     except:
                        print('Error converting tgs file '+str(file_attach)) 
                     myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
@@ -977,10 +982,12 @@ async def inline_cmd(bot, message, replies, payload):
                        attach = await client.download_media(r.audio, contacto)
                  except:
                     print('Error descargando inline audio result')
-              try:      
+              try:
+                 if attach.lower().endswith('.webp'):
+                    tipo = 'sticker'    
                  if attach.lower().endswith('.tgs'):
                     filename, file_extension = os.path.splitext(attach)
-                    attach_converted = filename+'.png'
+                    attach_converted = filename+'.webp'
                     await convertsticker(attach,attach_converted)
                     attach = attach_converted
                     tipo = 'sticker'
