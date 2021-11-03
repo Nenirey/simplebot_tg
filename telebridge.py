@@ -69,6 +69,7 @@ def start_background_loop(bridge_initialized: Event) -> None:
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
+    bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar('telegram.jpeg')
     bot.account.set_config("mdns_enabled","0")
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
