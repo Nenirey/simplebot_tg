@@ -10,9 +10,6 @@ Jinja2
 requests
 six
 urllib3
-Werkzeug
-bs4
-schedule
 git+https://github.com/Nenirey/Telethon@master#telethon
 git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
