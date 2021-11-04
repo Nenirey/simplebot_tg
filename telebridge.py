@@ -576,14 +576,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        dchat = chat_id.get_name()
        is_auto = True
        myreplies = Replies(bot, logger=bot.logger)
+       max_limit = 1
        #print(contacto)
-       print(dchat)
-       #print(str(chat_id))
+       print(dchat)       
     else:
        contacto = message.get_sender_contact().addr
        dchat = message.chat.get_name()
        chat_id = bot.get_chat(message.chat)
        myreplies = replies
+       max_limit = 5
        print(dchat)
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
     if len(tg_ids)>0:
@@ -647,7 +648,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           all_messages.reverse()
        m_id = -0
        for m in all_messages:
-           if limite<5:
+           if limite<max_limit:
               mquote = ''
               mservice = ''
               file_attach = 'archivo'
@@ -777,7 +778,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  print('Leyendo mensaje '+str(m_id))
               #client.send_read_acknowledge(entity=int(key), message=m)
               if is_auto:
-                 myreplies.send_reply_messages()   
+                 myreplies.send_reply_messages()
+                 if os.path.exists(file_attach):
+                    os.remove(file_attach) 
               limite+=1
            else:
               if not load_history and not is_auto:
