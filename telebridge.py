@@ -367,7 +367,7 @@ async def login_session(payload, replies, message):
               last_name= ""
            nombre= (first_name + ' ' + last_name).strip()
            await client.disconnect()
-           replies.add(text='Ah iniciado sesión correctamente '+str(nombre))
+           replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
            logindb[message.get_sender_contact().addr] = hash
        except:
           code = str(sys.exc_info())
