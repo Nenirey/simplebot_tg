@@ -29,7 +29,7 @@ from lottie.importers import importers
 from lottie.exporters import exporters
 from lottie.utils.stripper import float_strip, heavy_strip
 
-version = "0.1.3"
+version = "0.1.5"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -143,7 +143,7 @@ def list_chats(replies, message, payload):
         chat_list+='\n\n'+value+'\nDesvincular: /remove_'+key
     replies.add(text = chat_list)
 
-async def add_auto_chats(replies, message):
+async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     alloweddb ={'deltachat2':''}
     if message.get_sender_contact().addr not in logindb:
@@ -183,7 +183,7 @@ async def add_auto_chats(replies, message):
        code = str(sys.exc_info())
        print(code)
     if message.get_sender_contact().addr in chatdb:
-       if is_channel or is_user or is_allowed:
+       if is_channel or is_user or is_allowed or bot.is_admin(message.get_sender_contact()):
           messagedb[message.get_sender_contact().addr] = message.chat.id
           replies.add(text='Se ha automatizado este chat!')
        else:
@@ -191,9 +191,9 @@ async def add_auto_chats(replies, message):
     else:
        replies.add('Este no es un chat de Telegram!')
     
-def async_add_auto_chats(replies, message):
+def async_add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
-    loop.run_until_complete(add_auto_chats(replies, message))
+    loop.run_until_complete(add_auto_chats(bot, replies, message))
 
 async def save_delta_chats(replies, message):
     """This is for save the chats deltachat/telegram in Telegram Saved message user"""
@@ -286,7 +286,7 @@ async def login_num(payload, replies, message):
        me = await clientdb[message.get_sender_contact().addr].send_code_request(payload)
        hashdb[message.get_sender_contact().addr] = me.phone_code_hash
        phonedb[message.get_sender_contact().addr] = payload
-       replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', por favor introdusca /sms CODIGO para iniciar')
+       replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', puede que le llegue a su cliente de Telegram, por favor introdusca /sms CODIGO para iniciar')
     except:
        code = str(sys.exc_info())
        print(code)
@@ -501,7 +501,7 @@ async def down_media(message, replies, payload):
               if hasattr(m,'document') and m.document:
                  if m.document.size<20971520:
                     file_attach = await client.download_media(m.document, message.get_sender_contact().addr)
-                    replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                    replies.add(text = send_by+"\n"+str(m.message), filename = file_attach)
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        if hasattr(m.document.attributes[0],'file_name'):
@@ -515,7 +515,7 @@ async def down_media(message, replies, payload):
                  if hasattr(m.media,'photo'):
                     if m.media.photo.sizes[1].size<20971520:
                        file_attach = await client.download_media(m.media, message.get_sender_contact().addr)
-                       replies.add(text = send_by+file_attach+"\n"+str(m.message), filename = file_attach)
+                       replies.add(text = send_by+"\n"+str(m.message), filename = file_attach)
                     else:
                        replies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id))
               print('Descargando mensaje '+str(m.id))
@@ -730,7 +730,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                             
                     except:
                        print('Error converting tgs file '+str(file_attach)) 
-                    myreplies.add(text = send_by+file_attach+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
+                    myreplies.add(text = send_by+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        if hasattr(m.document.attributes[0],'file_name'):
@@ -744,7 +744,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.media,'photo'):
                     if m.media.photo.sizes[1].size<512000:
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = send_by+str(file_attach)+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                       myreplies.add(text = send_by+"\n"+str(m.message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        myreplies.add(text = send_by+str(m.message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
                     no_media = False
