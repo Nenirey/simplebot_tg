@@ -766,7 +766,7 @@ async def echo_filter(message, replies):
        else:
           target = id_chat
        if message.filename:
-          if message.is_audio():
+          if message.is_audio() or message.filename.lower().endswith('.aac'):
              await client.send_file(target, message.filename, voice_note=True)
           else:
              if len(message.text) > 1024:
