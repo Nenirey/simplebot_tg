@@ -548,12 +548,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              if tchat.users[0].last_name:
                 last_name= tchat.users[0].last_name
              else:
-                last_name= ""
-             if tchat.users[0].username:
-                user_name= "(@"+tchat.users[0].username+")"
-             else:
-                user_name= ""   
-             ttitle = (first_name + ' ' + last_name + ' ' + user_name).strip()
+                last_name= ""            
+             ttitle = (first_name + ' ' + last_name).strip()
        sin_leer = tchat.dialogs[0].unread_count
        limite = 0
        load_history = False
@@ -974,8 +970,7 @@ async def search_chats(bot, message, replies, payload):
         for d in all_chats:
             id_chats[d.entity.id] = ''
         resultados = await client(functions.contacts.SearchRequest(q=payload, limit=5))
-        for rchat in resultados.chats:
-            #await client.get_entity(rchat)
+        for rchat in resultados.chats:            
             if hasattr(rchat, 'photo'):
                profile_img = await client.download_profile_photo(rchat, message.get_sender_contact().addr)
             else:
@@ -984,8 +979,7 @@ async def search_chats(bot, message, replies, payload):
                replies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nCargar: /load_'+str(rchat.username), filename = profile_img)
             else:
                replies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nUnirse: /join_'+str(rchat.username)+'\nVista previa: /preview_'+str(rchat.username), filename = profile_img)
-        for ruser in resultados.users:
-            #await client.get_entity(ruser)
+        for ruser in resultados.users:           
             if hasattr(ruser, 'photo'):
                profile_img = await client.download_profile_photo(ruser, message.get_sender_contact().addr)
             else:
@@ -994,7 +988,6 @@ async def search_chats(bot, message, replies, payload):
                replies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nCargar: /load_'+str(ruser.username), filename = profile_img)
             else:
                replies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nVista previa: /preview_'+str(ruser.username), filename = profile_img)
-
         await client.disconnect()
     except:
         code = str(sys.exc_info())
@@ -1078,7 +1071,7 @@ async def preview_chats(bot, payload, replies, message):
            uid = payload.replace('@','')
            uid = uid.replace(' ','_')
         if str(uid) not in chatdb[message.get_sender_contact().addr]:
-           replies.add(text = 'Creando chat...')
+           replies.add(text = 'Creando chat...')      
            pchat = await client.get_entity(uid)
            if hasattr(pchat, 'title') and pchat.title:
               ttitle =  str(pchat.title)
