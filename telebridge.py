@@ -898,6 +898,7 @@ async def inline_cmd(bot, message, replies, payload):
     example_inline = """
     /inline_gif para buscar gif animados
     /inline_vid para buscar videos en youtube
+    /inline_youtube para buscar videos en youtube
     /inline_bing para buscar imagenes en bing
     /inline_pic para buscar imagenes en Yandex
     /inline_wiki para buscar informacion en Wikipedia
@@ -941,7 +942,7 @@ async def inline_cmd(bot, message, replies, payload):
        for r in results:
            attach = ''
            tipo = None
-           if limite<5:
+           if limite<10:
               if hasattr(r,'title') and r.title:
                  resultado+=str(r.title)+'\n'
               if hasattr(r,'description') and r.description:
@@ -951,6 +952,10 @@ async def inline_cmd(bot, message, replies, payload):
               if hasattr(r,'message') and r.message:
                  if r.message.message:
                     resultado+=str(r.message.message)+'\n'
+                 if hasattr(r.message,'entities') and r.message.entities:
+                    for e in r.message.entities:
+                        if hasattr(e,'url') and e.url:
+                           resultado+=str(e.url)+'\n'     
               try:
                  if hasattr(r,'document') and r.document:
                     attach = await client.download_media(r.document, contacto)
