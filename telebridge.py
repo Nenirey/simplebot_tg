@@ -266,6 +266,8 @@ def remove_chat(payload, replies, message):
           for (key, value) in chatdb[message.get_sender_contact().addr].items():
               if value == str(message.chat.get_name()):
                  del chatdb[message.get_sender_contact().addr][key]
+                 if message.get_sender_contact().addr in messagedb:
+                    del messagedb[message.get_sender_contact().addr]
                  replies.add(text = 'Se desvinculó el chat delta '+str(message.chat.id)+' con el chat telegram '+key)
                  break
        else:
@@ -278,18 +280,31 @@ def logout_tg(payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
+       if message.get_sender_contact().addr in messagedb:
+          del messagedb[message.get_sender_contact().addr]
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
 
 async def login_num(payload, replies, message):
     try:
+       forzar_sms = False 
+       parametros = payload.split()
+       if len(parametros)<1:
+          replies.add(text='Debe escribir el codigo del pais mas el numero (sin espacios), ejemplo /login +5355555555')  
+          return
+       if len(parametros) == 2:
+          if parametros[1].lower()!='sms':
+             replies.add(text='El numero no debe contener espacios!.')
+             return
+          else:
+             forzar_sms = True
        clientdb[message.get_sender_contact().addr] = TC(StringSession(), api_id, api_hash)
        await clientdb[message.get_sender_contact().addr].connect()
-       me = await clientdb[message.get_sender_contact().addr].send_code_request(payload)
+       me = await clientdb[message.get_sender_contact().addr].send_code_request(parametros[0], force_sms = forzar_sms)
        hashdb[message.get_sender_contact().addr] = me.phone_code_hash
-       phonedb[message.get_sender_contact().addr] = payload
-       replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+payload+', puede que le llegue a su cliente de Telegram, por favor introdusca /sms CODIGO para iniciar')
+       phonedb[message.get_sender_contact().addr] = parametros[0]
+       replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+parametros[0]+', puede que le llegue a su cliente de Telegram o reciba una llamada, por favor introdusca /sms CODIGO para iniciar')
     except:
        code = str(sys.exc_info())
        print(code)
@@ -402,7 +417,8 @@ async def updater(bot, payload, replies, message):
        all_chats = await client.get_dialogs(ignore_migrated = True)
        chats_limit = 5
        filtro = payload.replace(' ','_')
-       replies.add(text = 'Obteniedo chats...'+filtro)
+       ya_agregados = '' 
+       replies.add(text = 'Obteniendo chats...'+filtro)
        for d in all_chats:
            if hasattr(d.entity,'username'):
               uname = str(d.entity.username)
@@ -441,7 +457,11 @@ async def updater(bot, payload, replies, message):
                  replies.add(text = "Tienes "+str(d.unread_count)+" mensajes sin leer de "+ttitle+" id:[`"+str(d.id)+"`]\n/more", chat = chat_id)
               if chats_limit<=0:
                  break
+           else:
+              ya_agregados += '\nYa tiene agregado: '+str(ttitle)+' /remove_'+str(d.id)   
        await client.disconnect()
+       if ya_agregados!='':
+          replies.add(text=ya_agregados)  
        replies.add(text='Se agregaron '+str(5-chats_limit)+' chats a la lista!')
     except:
        code = str(sys.exc_info())
@@ -876,6 +896,10 @@ async def inline_cmd(bot, message, replies, payload):
        resultado = ''
        
        limite = 0
+       if len(results)<1:
+          replies.add('La busqueda no arrojó ningun resultado.')  
+          await client.disconnect()
+          return  
        for r in results:
            attach = ''
            tipo = None
@@ -970,6 +994,10 @@ async def search_chats(bot, message, replies, payload):
         for d in all_chats:
             id_chats[d.entity.id] = ''
         resultados = await client(functions.contacts.SearchRequest(q=payload, limit=5))
+        if len(resultados)<1:
+           replies.add('La busqueda no arrojó ningun resultado.')  
+           await client.disconnect()
+           return 
         for rchat in resultados.chats:            
             if hasattr(rchat, 'photo'):
                profile_img = await client.download_profile_photo(rchat, message.get_sender_contact().addr)
