@@ -733,8 +733,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
 
               #process replies and mark message as read              
-              if m:
-                 myreplies.send_reply_messages()                 
+              if m:                                 
                  await m.mark_read()
                  m_id = m.id
                  print('Leyendo mensaje '+str(m_id))
@@ -744,15 +743,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               limite+=1
            else:
               if not load_history and not is_auto:
-                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)
-                 myreplies.send_reply_messages()
+                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)                 
               break
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n/more", chat = chat_id)
-          myreplies.send_reply_messages()  
+          
        if load_history:
           myreplies.add(text = "Cargar más mensajes:\n/more_-"+str(m_id), chat = chat_id)
-          myreplies.send_reply_messages()  
+       myreplies.send_reply_messages()  
        await client.disconnect()
     except:
        code = str(sys.exc_info())
