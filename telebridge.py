@@ -458,10 +458,10 @@ async def updater(bot, payload, replies, message):
               if chats_limit<=0:
                  break
            else:
-              ya_agregados += '\nYa tiene agregado: '+str(ttitle)+' /remove_'+str(d.id)   
+              ya_agregados += '\n'+str(ttitle)+' /remove_'+str(d.id)   
        await client.disconnect()
        if ya_agregados!='':
-          replies.add(text=ya_agregados)  
+          replies.add(text='Ya tienes agregados:\n'+ya_agregados)  
        replies.add(text='Se agregaron '+str(5-chats_limit)+' chats a la lista!')
     except:
        code = str(sys.exc_info())
@@ -994,7 +994,7 @@ async def search_chats(bot, message, replies, payload):
         for d in all_chats:
             id_chats[d.entity.id] = ''
         resultados = await client(functions.contacts.SearchRequest(q=payload, limit=5))
-        if len(resultados)<1:
+        if len(resultados.chats)<1 and len(resultados.users)<1:
            replies.add('La busqueda no arrojó ningun resultado.')  
            await client.disconnect()
            return 
