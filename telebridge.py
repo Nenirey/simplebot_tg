@@ -33,6 +33,7 @@ version = "0.1.5"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
+admin_addr = os.getenv('ADMIN')
 
 
 global phonedb
@@ -96,7 +97,6 @@ def deltabot_init(bot: DeltaBot) -> None:
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
-    global auto_load_task
     bridge_init = Event()
     Thread(
         target=start_background_loop,
@@ -106,6 +106,7 @@ def deltabot_start(bot: DeltaBot) -> None:
     bridge_init.wait()
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
+    bot.get_chat(admin_addr).send_text('El bot '+bot.account.get_config('addr')+' se ha iniciado correctamente')
 
     
 def print_dep_message(loader):
@@ -513,34 +514,29 @@ def async_click_button(bot, message, replies, payload):
     parametros = payload.split()
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0]))
 
-async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None):
-    is_auto = False   
-    if dc_contact and dc_id :
-       contacto = dc_contact
-       chat_id = bot.get_chat(dc_id)
-       dchat = chat_id.get_name()
-       is_auto = True
-       myreplies = Replies(bot, logger=bot.logger)
+async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
+    contacto = dc_contact
+    chat_id = bot.get_chat(dc_id)
+    dchat = chat_id.get_name()
+    if is_auto:
        max_limit = 1
-       is_down = False
-       print(dchat)       
+       is_down = False       
     else:
-       contacto = message.get_sender_contact().addr
-       dchat = message.chat.get_name()
-       chat_id = bot.get_chat(message.chat)
-       myreplies = replies
        max_limit = 5
        is_down = message.text.lower().startswith('/down')
-       print(dchat)
+    print(dchat)
+    myreplies = Replies(bot, logger=bot.logger)
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
     if len(tg_ids)>0:
        id_chat=tg_ids[-1]
     else:
-       replies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
+       myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
+       myreplies.send_reply_messages()
        return
 
     if contacto not in logindb:
-       replies.add(text = 'Debe iniciar sesión para cargar los mensajes!', chat = chat_id)
+       myreplies.add(text = 'Debe iniciar sesión para cargar los mensajes!', chat = chat_id)
+       myreplies.send_reply_messages()
        return
 
     if not os.path.exists(contacto):
@@ -706,7 +702,19 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.media,'webpage'):
                     if m.media.webpage:
                        no_media = False
-                       file_attach = await client.download_media(m.media, contacto)
+                       down_button = ''
+                       if hasattr(m.media.webpage,'photo'):
+                          if m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520):
+                             file_attach = await client.download_media(m.media, contacto)
+                          else:
+                             down_button = '\n[FOTO]/down_'+str(m.id)
+                             file_attach = ''
+                       if hasattr(m.media.webpage,'document'):
+                          if m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520):
+                             file_attach = await client.download_media(m.media, contacto)
+                          else:
+                             down_button = '\n[ARCHIVO]/down_'+str(m.id)
+                             file_attach = ''   
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
                           wtitle = m.media.webpage.title
                        else:
@@ -719,43 +727,42 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = m.media.webpage.url
                        else:
                           wurl = ''
-                       myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                       myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        no_media = True
                     
               #send only text message
               if m and no_media:
                  myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
-              if m:
+
+              #process replies and mark message as read              
+              if m:                                 
                  await m.mark_read()
-              if m:
                  m_id = m.id
                  print('Leyendo mensaje '+str(m_id))
-              if is_auto:
-                 myreplies.send_reply_messages()
-                 if os.path.exists(file_attach):
-                    os.remove(file_attach) 
+                
+              if os.path.exists(file_attach):
+                 os.remove(file_attach) 
               limite+=1
            else:
               if not load_history and not is_auto:
-                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)
+                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)                 
               break
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n/more", chat = chat_id)
+          
        if load_history:
           myreplies.add(text = "Cargar más mensajes:\n/more_-"+str(m_id), chat = chat_id)
+       myreplies.send_reply_messages()  
        await client.disconnect()
     except:
        code = str(sys.exc_info())
        myreplies.add(text=code, chat = chat_id)
 
 
-def async_load_chat_messages(bot, message, replies, payload, args = None):
-    """Load more messages from telegram in a chat"""
-    if len(args)>1:
-       dc_contact = args[0]
-       dc_id = args[1]
-    loop.run_until_complete(load_chat_messages(bot, message, replies, payload, dc_contact = None, dc_id = None))
+def async_load_chat_messages(bot, message, replies, payload):
+    """Load more messages from telegram in a chat""" 
+    loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
 @simplebot.command
@@ -1146,7 +1153,7 @@ async def auto_load(bot, message, replies):
         for (key, value) in messagedb.items():
             print('Autodescarga de '+str(key)+' chat '+str(value))
             try:              
-               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value)              
+               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value, is_auto=True)              
             except:
                code = str(sys.exc_info())
                print(code)
