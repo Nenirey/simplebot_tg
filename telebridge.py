@@ -714,18 +714,20 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     no_media = False
                  print('Leyendo webs')   
                  #check if message have media webpage  
-                 if hasattr(m.media,'webpage'):
-                    if m.media.webpage:
+                 if hasattr(m.media,'webpage') and m.media.webpage:
+                    if True:
                        no_media = False
                        down_button = ''
-                       if hasattr(m.media.webpage,'photo'):
-                          if m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520):
+                       print('Leyendo fotos webs')
+                       if hasattr(m.media.webpage,'photo') and m.media.webpage.photo:
+                          if hasattr(m.media.webpage.photo,'sizes') and (m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520)):
                              file_attach = await client.download_media(m.media, contacto)
                           else:
                              down_button = '\n[FOTO]/down_'+str(m.id)
                              file_attach = ''
-                       if hasattr(m.media.webpage,'document'):
-                          if m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520):
+                       print('Leyendo archivos webs')
+                       if hasattr(m.media.webpage,'document') and m.media.wepage.document:
+                          if hasattr(m.media.webpage.document,'size') and (m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520)):
                              file_attach = await client.download_media(m.media, contacto)
                           else:
                              down_button = '\n[ARCHIVO]/down_'+str(m.id)
