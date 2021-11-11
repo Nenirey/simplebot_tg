@@ -611,10 +611,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               text_message = ''  
               if show_id:
                  msg_id = '\n'+str(m.id)
+              print('Leyendo texto')
               #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.text (raw text) instead
               if hasattr(m,'message'):
                  text_message = str(m.message)                    
-                              
+              print('Leyendo respuesta')              
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
                  if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
@@ -642,12 +643,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        if len(reply_text)>60:
                           reply_text = reply_text[0:60]+'...'
                        mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
-                    
+              print('Leyendo mensaje del sistema')      
               #check if message is a system message
               if hasattr(m,'action') and m.action:
                  mservice = '_system message_\n'
                  #mservice += str(m.action)
-                    
+              print('Leyendo remitente')     
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
                  first_name= m.sender.first_name
@@ -658,7 +659,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  send_by = str((first_name + ' ' + last_name).strip())+":\n"
               else:
                  send_by = ""
-                    
+              print('Leyendo botones')      
               #check if message have buttons
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
                  nrow = 0
@@ -674,7 +675,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-                        
+              print('Leyendo archivos')          
               #check if message have document
               if hasattr(m,'document') and m.document:
                  if m.document.size<512000 or (is_down and m.document.size<20971520):
@@ -700,7 +701,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           file_attach = m.document.attributes[0].title
                     myreplies.add(text = send_by+str(text_message)+"\n"+str(file_attach)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
                  no_media = False
-                
+              print('Leyendo fotos')  
               #check if message have media
               if hasattr(m,'media') and m.media:
                  #check if message have photo  
@@ -711,7 +712,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     else:
                        myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
                     no_media = False
-                    
+                 print('Leyendo webs')   
                  #check if message have media webpage  
                  if hasattr(m.media,'webpage'):
                     if m.media.webpage:
@@ -744,11 +745,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        no_media = True
-                    
+              print('Enviando texto')     
               #send only text message
               if no_media:
                  myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
-
+              print('Marcando como leido')
               #mark message as read                                              
               await m.mark_read()
               m_id = m.id
