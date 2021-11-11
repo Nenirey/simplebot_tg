@@ -731,7 +731,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                              file_attach = await client.download_media(m.media, contacto)
                           else:
                              down_button = '\n[ARCHIVO]/down_'+str(m.id)
-                             file_attach = ''   
+                             file_attach = ''
+                       print('Leyendo titulos webs')   
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
                           wtitle = m.media.webpage.title
                        else:
@@ -744,7 +745,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = m.media.webpage.url
                        else:
                           wurl = ''
-                       myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                       print('Adjuntando archivos webs')
+                       if file_attach!= '':
+                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                       else:
+                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, chat = chat_id)
                     else:
                        no_media = True
               print('Enviando texto')     
