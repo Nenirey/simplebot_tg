@@ -54,6 +54,10 @@ logindb = {}
 global messagedb
 messagedb = {}
 
+global autochatsdb
+#{contact_addr:{dc_id:tg_id}}
+autochatsdb = {}
+
 global chatdb
 chatdb = {}
 
@@ -146,8 +150,6 @@ def list_chats(replies, message, payload):
 
 async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
-    global auto_load_task
-    global tloop
     alloweddb ={'deltachat2':''}
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
@@ -180,15 +182,18 @@ async def add_auto_chats(bot, replies, message):
                 is_allowed = True    
        else:
           is_user = True
-            
+       sin_leer = tchat.dialogs[0].unread_count     
        await client.disconnect()
     except Exception as e:
        code = str(sys.exc_info())
        print(code)
     if message.get_sender_contact().addr in chatdb:
        if is_channel or is_user or is_allowed or bot.is_admin(message.get_sender_contact()):
-          messagedb[message.get_sender_contact().addr] = message.chat.id
-          replies.add(text='Se ha automatizado este chat!')
+          #{contact_addr:{chat_id:chat_type}}
+          if message.get_sender_contact().addr not in autochatsdb:
+             autochatsdb[message.get_sender_contact().addr]={}   
+          autochatsdb[message.get_sender_contact().addr][message.chat.id]=target  
+          replies.add(text='Se ha automatizado este chat, tiene '+str(sin_leer)+' mensajes sin leer!')
        else:
           replies.add(text='Solo se permite automatizar chats privados, canales y algunos grupos permitidos por ahora')           
     else:
@@ -254,26 +259,34 @@ def remove_chat(payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para eliminar chats!')
        return
-    target = payload.replace(' ','_')
+    target = ''
+    if not payload or payload =='':
+       dchat = message.chat.get_name()
+       tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
+       if len(tg_ids)>0:
+          target = tg_ids[-1]
+    else:
+       target = payload.replace(' ','_')
     if target == 'all':
        chatdb[message.get_sender_contact().addr].clear()
+       if message.get_sender_contact().addr in autochatsdb:
+          autochatsdb[message.get_sender_contact().addr].clear() 
        replies.add(text = 'Se desvincularon todos sus chats de telegram.')
-    if target in chatdb[message.get_sender_contact().addr]:
-       c_title = chatdb[message.get_sender_contact().addr][target]
-       del chatdb[message.get_sender_contact().addr][target]
-       replies.add(text = 'Se desvinculó el chat delta '+c_title+' con el chat telegram '+target)
-    if not payload or payload =='':
-       if str(message.chat.get_name()) in chatdb[message.get_sender_contact().addr].values():
-          for (key, value) in chatdb[message.get_sender_contact().addr].items():
-              if value == str(message.chat.get_name()):
-                 del chatdb[message.get_sender_contact().addr][key]
-                 if message.get_sender_contact().addr in messagedb:
-                    del messagedb[message.get_sender_contact().addr]
-                 replies.add(text = 'Se desvinculó el chat delta '+str(message.chat.id)+' con el chat telegram '+key)
-                 break
+    else:
+       if target in chatdb[message.get_sender_contact().addr]: 
+          c_title = chatdb[message.get_sender_contact().addr][target]    
+          del chatdb[message.get_sender_contact().addr][target]                                               
+          replies.add(text = 'Se desvinculó el chat delta '+c_title+' con el chat telegram '+target)  
        else:
           replies.add(text = 'Este chat no está vinculado a telegram')
-          return
+       try:
+          if message.get_sender_contact().addr in autochatsdb:          
+             for (key, value) in autochatsdb[message.get_sender_contact().addr].items():
+                 if str(value) == target:             
+                    del autochatsdb[message.get_sender_contact().addr][key]
+                    replies.add(text = 'Se desactivaron las actualizaciones para el chat '+str(key))
+       except:
+          print('Dictionary change size...')
     async_save_delta_chats(replies, message)
 
 
@@ -282,7 +295,7 @@ def logout_tg(payload, replies, message):
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
        if message.get_sender_contact().addr in messagedb:
-          del messagedb[message.get_sender_contact().addr]
+          del autochatsdb[message.get_sender_contact().addr]
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
@@ -435,7 +448,7 @@ async def updater(bot, payload, replies, message):
            else:
               private_only = False
            if payload!='' and payload.lower()!='#privates':
-              if ttitle.lower().find(payload.lower())>=0 or tid is payload or uname is filtro:
+              if ttitle.lower().find(payload.lower())>=0 or tid is payload or uname.lower() is filtro.lower():
                  find_only = False
               else:
                  find_only = True
@@ -459,10 +472,11 @@ async def updater(bot, payload, replies, message):
               if chats_limit<=0:
                  break
            else:
-              ya_agregados += '\n'+str(ttitle)+' /remove_'+str(d.id)   
+              if str(d.id) in chatdb[message.get_sender_contact().addr]:
+                 ya_agregados += '\n'+str(ttitle)+' /remove_'+str(d.id)   
        await client.disconnect()
        if ya_agregados!='':
-          replies.add(text='Ya tienes agregados:\n'+ya_agregados)  
+          replies.add(text='Ya tienes agregados:\n'+ya_agregados+'\n\nUse /list para mostrar sus chats vinculados')  
        replies.add(text='Se agregaron '+str(5-chats_limit)+' chats a la lista!')
     except:
        code = str(sys.exc_info())
@@ -524,7 +538,6 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     else:
        max_limit = 5
        is_down = message.text.lower().startswith('/down')
-    print(dchat)
     myreplies = Replies(bot, logger=bot.logger)
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
     if len(tg_ids)>0:
@@ -582,11 +595,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              all_messages = await client.get_messages(target, limit = 1)
           else:
              all_messages = await client.get_messages(target, limit = sin_leer)
+       print('Mensajes cargados de '+str(dchat)+': '+str(len(all_messages)))         
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
        m_id = -0
        for m in all_messages:
-           if limite<max_limit:
+           if m and limite<max_limit:
               mquote = ''
               mservice = ''
               file_attach = 'archivo'
@@ -595,14 +609,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               msg_id = ''
               tipo = None
               text_message = ''  
-              if m and show_id:
+              if show_id:
                  msg_id = '\n'+str(m.id)
-              if m:
-                 #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.message instead
-                 text_message = m.text                    
+              #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.message instead
+              text_message = m.text                    
                               
               #check if message is a reply
-              if m and hasattr(m,'reply_to'):
+              if hasattr(m,'reply_to'):
                  if hasattr(m.reply_to,'reply_to_msg_id'):
                     mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
                     if mensaje and mensaje[0]:
@@ -627,15 +640,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        reply_text += str(mensaje[0].text)
                        if len(reply_text)>60:
                           reply_text = reply_text[0:60]+'...'
-                       mquote = '>'+reply_send_by+reply_text+'\n\n'
+                       mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
                     
               #check if message is a system message
-              if m and hasattr(m,'action') and m.action:
+              if hasattr(m,'action') and m.action:
                  mservice = '_system message_\n'
                  #mservice += str(m.action)
                     
               #extract sender name
-              if m and hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
+              if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
                  first_name= m.sender.first_name
                  if m.sender.last_name:
                     last_name= m.sender.last_name
@@ -646,7 +659,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  send_by = ""
                     
               #check if message have buttons
-              if m and hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
+              if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
                  nrow = 0
                  html_buttons = '\n\n---\n'
                  for row in m.reply_markup.rows:
@@ -662,7 +675,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                      nrow += 1
                         
               #check if message have document
-              if m and hasattr(m,'document') and m.document:
+              if hasattr(m,'document') and m.document:
                  if m.document.size<512000 or (is_down and m.document.size<20971520):
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
@@ -688,7 +701,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  no_media = False
                 
               #check if message have media
-              if m and hasattr(m,'media') and m.media:
+              if hasattr(m,'media') and m.media:
                  #check if message have photo  
                  if hasattr(m.media,'photo'):
                     if m.media.photo.sizes[1].size<512000 or (is_down and m.media.photo.sizes[1].size<20971520):
@@ -732,14 +745,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        no_media = True
                     
               #send only text message
-              if m and no_media:
+              if no_media:
                  myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
 
-              #process replies and mark message as read              
-              if m:                                 
-                 await m.mark_read()
-                 m_id = m.id
-                 print('Leyendo mensaje '+str(m_id))
+              #mark message as read                                              
+              await m.mark_read()
+              m_id = m.id
+              print('Leyendo mensaje '+str(m_id))
                 
               if os.path.exists(file_attach):
                  os.remove(file_attach) 
@@ -1147,16 +1159,20 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
     replies.add(text=code or "echo")
 
 async def auto_load(bot, message, replies):
-    global messagedb
+    global autochatsdb
     while True:
-        #print('Ejecutando auto descargas...')
-        for (key, value) in messagedb.items():
-            print('Autodescarga de '+str(key)+' chat '+str(value))
-            try:              
-               await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = value, is_auto=True)              
-            except:
-               code = str(sys.exc_info())
-               print(code)
+        #{contact_addr:{chat_id:chat_type}}
+        try:
+           for (key, value) in autochatsdb.items():            
+               for (inkey, invalue) in value.items():
+                   print('Autodescarga de '+str(key)+' chat '+str(inkey))
+                   try:              
+                      await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)              
+                   except:
+                      code = str(sys.exc_info())
+                      print(code)
+        except:
+           print('Error in autochatsdb dict')
         await asyncio.sleep(15)
 
 def start_updater(bot, message, replies):
