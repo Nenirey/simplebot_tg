@@ -611,12 +611,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               text_message = ''  
               if show_id:
                  msg_id = '\n'+str(m.id)
-              #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.message instead
-              text_message = m.text                    
+              #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.text (raw text) instead
+              if hasattr(m,'message'):
+                 text_message = str(m.message)                    
                               
               #check if message is a reply
-              if hasattr(m,'reply_to'):
-                 if hasattr(m.reply_to,'reply_to_msg_id'):
+              if hasattr(m,'reply_to') and m.reply_to:
+                 if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
                     mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
                     if mensaje and mensaje[0]:
                        reply_text = ''
