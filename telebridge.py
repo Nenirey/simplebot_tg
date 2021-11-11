@@ -726,12 +726,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                              down_button = '\n[FOTO]/down_'+str(m.id)
                              file_attach = ''
                        print('Leyendo archivos webs')
-                       if hasattr(m.media.webpage,'document') and m.media.wepage.document:
-                          if hasattr(m.media.webpage.document,'size') and (m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520)):
-                             file_attach = await client.download_media(m.media, contacto)
-                          else:
-                             down_button = '\n[ARCHIVO]/down_'+str(m.id)
-                             file_attach = ''
+                       #if hasattr(m.media.webpage,'document') and m.media.wepage.document:
+                       #   if hasattr(m.media.webpage.document,'size') and (m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520)):
+                       file_attach = await client.download_media(m.media, contacto)
+                       #   else:
+                       #      down_button = '\n[ARCHIVO]/down_'+str(m.id)
+                       #      file_attach = ''
                        print('Leyendo titulos webs')   
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
                           wtitle = m.media.webpage.title
