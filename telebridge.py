@@ -752,7 +752,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               await m.mark_read()
               m_id = m.id
               print('Leyendo mensaje '+str(m_id))
-                
+              myreplies.send_reply_messages()  
               if os.path.exists(file_attach):
                  os.remove(file_attach) 
               limite+=1
