@@ -603,7 +603,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
            if m and limite<max_limit:
               mquote = ''
               mservice = ''
-              file_attach = 'archivo'
+              file_attach = ''
+              file_title = '[ARCHIVO]'
               no_media = True
               html_buttons = ''
               msg_id = ''
@@ -696,10 +697,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  else:
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        if hasattr(m.document.attributes[0],'file_name'):
-                          file_attach = m.document.attributes[0].file_name
+                          file_title = m.document.attributes[0].file_name
                        if hasattr(m.document.attributes[0],'title'):
-                          file_attach = m.document.attributes[0].title
-                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_attach)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
+                          file_title = m.document.attributes[0].title
+                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
                  no_media = False
               
               #check if message have media
@@ -725,14 +726,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           else:
                              down_button = '\n[FOTO]/down_'+str(m.id)
                              file_attach = ''
-                       print('Leyendo archivos webs')
+                       
                        #if hasattr(m.media.webpage,'document') and m.media.wepage.document:
                        #   if hasattr(m.media.webpage.document,'size') and (m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520)):
-                       file_attach = await client.download_media(m.media, contacto)
+                       #      file_attach = await client.download_media(m.media, contacto)
                        #   else:
                        #      down_button = '\n[ARCHIVO]/down_'+str(m.id)
                        #      file_attach = ''
-                       print('Leyendo titulos webs')   
+                       
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
                           wtitle = m.media.webpage.title
                        else:
@@ -745,7 +746,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = m.media.webpage.url
                        else:
                           wurl = ''
-                       print('Adjuntando archivos webs')
+                       
                        if file_attach!= '':
                           myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                        else:
@@ -760,9 +761,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #mark message as read                                              
               await m.mark_read()
               m_id = m.id
-              print('Leyendo mensaje '+str(m_id))
-              myreplies.send_reply_messages()  
+              print('Leyendo mensaje '+str(m_id))             
               if os.path.exists(file_attach):
+                 myreplies.send_reply_messages()
                  os.remove(file_attach) 
               limite+=1
            else:
