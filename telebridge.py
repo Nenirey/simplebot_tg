@@ -98,6 +98,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/auto" ,func = async_add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
+    bot.commands.register(name = "/forward" ,func = async_forward_message)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -133,7 +134,58 @@ async def convertsticker(infilepath,outfilepath):
        print_dep_message(exporters)
 
     an = importer.process(infilepath)
-    exporter.process(an, outfilepath, quality=5, skip_frames=30, dpi=5)     
+    exporter.process(an, outfilepath, quality=5, skip_frames=30, dpi=5)
+    
+    
+async def forward_message(message, replies, payload):
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para reenviar mensajes!')
+       return
+    dchat = message.chat.get_name()
+    tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
+    if len(tg_ids)>0:
+       if tg_ids[-1].lstrip('-').isnumeric(): 
+          f_id = int(tg_ids[-1])
+       else:
+          f_id = tg_ids[-1]
+    else:
+       replies.add(text = 'Este no es un chat de telegram!')
+       return
+    parametros = payload.split()
+    m_id = None
+    d_id = None
+    if len(parametros)>1:
+       if parametros[0].isnumeric():
+          m_id = int(parametros[0])
+          s = payload.replace(parametros[0]+' ','',1)
+          s = s.replace(' ','_')
+          if s.isnumeric():
+             d_id = int(s)
+          else:
+             d_id = s
+    
+    if not m_id or not d_id:
+       replies.add('Debe proporcionar el id del mensaje a reenviar, un espacio y el id del chat destino, ejemplo: /forward 1234 deltachat2')
+       return
+    try:
+       replies.add(text='Reanviando mensaje... '+str(m_id)+' a '+str(d_id)+' de '+str(f_id)) 
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       await client.forward_messages(d_id, m_id, f_id) 
+       replies.add(text='Mensaje reenviado!')
+       await client.disconnect()        
+    except Exception as e:
+       code = str(sys.exc_info())
+       print(code)
+       replies.add(text=code) 
+
+def async_forward_message(message, replies, payload):
+    """Forward message to other chats using the message id and chat id, example: 
+    /forward 3648 me
+    this forward the message id 3648 to your saved messages
+    """
+    loop.run_until_complete(forward_message(message, replies, payload))    
     
 
 def list_chats(replies, message, payload):
@@ -704,7 +756,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               break
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
+                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
                  no_media = False
               
               #check if message have media
@@ -717,7 +769,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
+                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
                     no_media = False
                     
                  #check if message have media webpage  
@@ -732,7 +784,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
                                 #print('Foto web muy grande!')
-                                down_button = '\n[FOTO WEB]/down_'+str(m.id)
+                                down_button = '\n[FOTO WEB]/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'document') and m.media.webpage.document:
@@ -742,7 +794,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
                                 #print('Archivo web muy grande!')
-                                down_button = '\n[ARCHIVO WEB]/down_'+str(m.id)
+                                down_button = '\n[ARCHIVO WEB]/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
