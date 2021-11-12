@@ -718,8 +718,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.media,'webpage') and m.media.webpage:
                     if True:
                        no_media = False
-                       down_button = ''
-                       print('Leyendo fotos webs')
+                       down_button = ''                       
                        if hasattr(m.media.webpage,'photo') and m.media.webpage.photo:
                           if hasattr(m.media.webpage.photo,'sizes') and (m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520)):
                              file_attach = await client.download_media(m.media, contacto)
@@ -758,14 +757,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if no_media:
                  myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
               
-              #mark message as read                                              
-              await m.mark_read()
+              #mark message as read                                                            
               m_id = m.id
               print('Leyendo mensaje '+str(m_id))             
-              if os.path.exists(file_attach):
+              if file_attach!='' and os.path.exists(file_attach):
                  myreplies.send_reply_messages()
                  os.remove(file_attach) 
               limite+=1
+              await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)                 
