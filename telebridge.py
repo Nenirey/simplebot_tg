@@ -680,7 +680,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message have document
               if hasattr(m,'document') and m.document:
                  if m.document.size<512000 or (is_down and m.document.size<20971520):
-                    print('Descargando archivo...')
+                    #print('Descargando archivo...')
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
                     try:
@@ -696,7 +696,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        print('Error converting tgs file '+str(file_attach)) 
                     myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
                  else:
-                    print('Archivo muy grande!')
+                    #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
                        for attr in m.document.attributes:
                            if hasattr(attr,'file_name') and attr.file_name:
@@ -712,11 +712,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  #check if message have photo  
                  if hasattr(m.media,'photo'):
                     if m.media.photo.sizes[1].size<512000 or (is_down and m.media.photo.sizes[1].size<20971520):
-                       print('Descargando foto...') 
+                       #print('Descargando foto...') 
                        file_attach = await client.download_media(m.media, contacto)
                        myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
-                       print('Foto muy grande!')
+                       #print('Foto muy grande!')
                        myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+html_buttons+msg_id, chat = chat_id)
                     no_media = False
                     
@@ -728,21 +728,21 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        if hasattr(m.media.webpage,'photo') and m.media.webpage.photo:
                           if hasattr(m.media.webpage.photo,'sizes') and m.media.webpage.photo.sizes and len(m.media.webpage.photo.sizes)>1:
                              if m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520):
-                                print('Descargando foto web...')
+                                #print('Descargando foto web...')
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
-                                print('Foto web muy grande!')
-                                down_button = '\n[FOTO]/down_'+str(m.id)
+                                #print('Foto web muy grande!')
+                                down_button = '\n[FOTO WEB]/down_'+str(m.id)
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'document') and m.media.webpage.document:
                           if hasattr(m.media.webpage.document,'size') and m.media.webpage.document.size:
                              if m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520):
-                                print('Descargando archivo web...')    
+                                #print('Descargando archivo web...')    
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
-                                print('Archivo web muy grande!')
-                                down_button = '\n[ARCHIVO]/down_'+str(m.id)
+                                #print('Archivo web muy grande!')
+                                down_button = '\n[ARCHIVO WEB]/down_'+str(m.id)
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
