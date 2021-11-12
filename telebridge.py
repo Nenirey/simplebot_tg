@@ -346,8 +346,8 @@ def logout_tg(payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
-       if message.get_sender_contact().addr in messagedb:
-          del autochatsdb[message.get_sender_contact().addr]
+       if message.get_sender_contact().addr in autochatsdb:
+          autochatsdb[message.get_sender_contact().addr].clear()
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
@@ -1246,7 +1246,8 @@ async def auto_load(bot, message, replies):
                       print(code)
         except:
            print('Error in autochatsdb dict')
-        await asyncio.sleep(15)
+        time.sleep(15)
+        #await asyncio.sleep(15)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
