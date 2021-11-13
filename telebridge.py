@@ -346,8 +346,8 @@ def logout_tg(payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
-       if message.get_sender_contact().addr in messagedb:
-          del autochatsdb[message.get_sender_contact().addr]
+       if message.get_sender_contact().addr in autochatsdb:
+          autochatsdb[message.get_sender_contact().addr].clear()
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
@@ -761,30 +761,41 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               
               #check if message have media
               if hasattr(m,'media') and m.media:
-                 #check if message have photo  
-                 if hasattr(m.media,'photo'):
-                    if m.media.photo.sizes[1].size<512000 or (is_down and m.media.photo.sizes[1].size<20971520):
+                 #check if message have photo
+                 f_size = 0  
+                 if hasattr(m.media,'photo') and m.media.photo:
+                    if hasattr(m.media.photo,'sizes') and m.media.photo.sizes and len(m.media.photo.sizes)>0:
+                       for sz in m.media.photo.sizes:
+                           if hasattr(sz,'size') and sz.size:
+                              f_size = sz.size
+                              break
+                    if f_size<512000 or (is_down and f_size<20971520):
                        #print('Descargando foto...') 
                        file_attach = await client.download_media(m.media, contacto)
                        myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(m.media.photo.sizes[1].size))+"/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
+                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+"/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
                     no_media = False
                     
                  #check if message have media webpage  
                  if hasattr(m.media,'webpage') and m.media.webpage:
                     if True:
                        no_media = False
-                       down_button = ''                       
+                       down_button = ''
+                       f_size = 0                       
                        if hasattr(m.media.webpage,'photo') and m.media.webpage.photo:
                           if hasattr(m.media.webpage.photo,'sizes') and m.media.webpage.photo.sizes and len(m.media.webpage.photo.sizes)>1:
-                             if m.media.webpage.photo.sizes[1].size<512000 or (is_down and m.media.webpage.sizes[1].size<20971520):
+                             for sz in m.media.webpage.photo.sizes:
+                                 if hasattr(sz,'size') and sz.size:
+                                    f_size = sz.size
+                                    break
+                             if f_size<512000 or (is_down and f_size<20971520):
                                 #print('Descargando foto web...')
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
                                 #print('Foto web muy grande!')
-                                down_button = '\n[FOTO WEB]/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
+                                down_button = '\n[FOTO WEB] '+sizeof_fmt(f_size)+'\n/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'document') and m.media.webpage.document:
@@ -1246,7 +1257,8 @@ async def auto_load(bot, message, replies):
                       print(code)
         except:
            print('Error in autochatsdb dict')
-        await asyncio.sleep(15)
+        time.sleep(15)
+        #await asyncio.sleep(15)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
