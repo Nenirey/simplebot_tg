@@ -1202,8 +1202,12 @@ async def preview_chats(bot, payload, replies, message):
            uid = payload.replace('@','')
            uid = uid.replace(' ','_')
         if str(uid) not in chatdb[message.get_sender_contact().addr]:
-           replies.add(text = 'Creando chat...')      
-           pchat = await client.get_entity(uid)
+           replies.add(text = 'Creando chat...')
+           #try input from cache first
+           try:      
+              pchat = await client.get_input_entity(uid)
+           except:
+              pchat = await client.get_entity(uid)
            if hasattr(pchat, 'title') and pchat.title:
               ttitle =  str(pchat.title)
            else:
