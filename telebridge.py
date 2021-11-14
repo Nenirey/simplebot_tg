@@ -641,7 +641,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              all_messages = await client.get_messages(target, limit = 1)
           else:
              all_messages = await client.get_messages(target, limit = sin_leer)
-       print('Mensajes cargados de '+str(dchat)+': '+str(len(all_messages)))         
+       print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))         
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
        m_id = -0
@@ -660,8 +660,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  msg_id = '\n'+str(m.id)
      
               #TODO try to determine if deltalab or deltachat to use m.message (not markdown) or m.text (raw text) instead
-              if hasattr(m,'message'):
-                 text_message = str(m.message)                    
+              if hasattr(m,'text') and m.text:
+                 text_message = str(m.text)
+              else:
+                 text_message = ''
                             
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
@@ -694,8 +696,17 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message is a system message
               if hasattr(m,'action') and m.action:
                  mservice = '_system message_\n'
-                 #mservice += str(m.action)
-                   
+                 if isinstance(m.action, types.MessageActionPinMessage):
+                    mservice += 'Anclo un mensaje!'
+                 elif isinstance(m.action, types.MessageActionChatAddUser):
+                    mservice += 'Agrego un usuario!'
+                 elif isinstance(m.action, types.MessageActionChatJoinedByLink):
+                    mservice += 'Se unio al grupo!'
+                 elif isinstance(m.action, types.MessageActionChatDeleteUser):
+                    mservice += 'Elimino un usuario!'
+                 elif isinstance(m.action, types.MessageActionChannelCreate):
+                    mservice += 'Se creo el grupo/canal!'   
+                    
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
                  first_name= m.sender.first_name
