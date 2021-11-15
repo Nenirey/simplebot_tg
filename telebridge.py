@@ -40,9 +40,9 @@ black_list = None
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
-   white_list = os.getenv('WHITE_LIST').strip()
+   white_list = os.getenv('WHITE_LIST').split()
 elif os.getenv('BLACK_LIST'):
-   black_list = os.getenv('BLACK_LIST').strip()
+   black_list = os.getenv('BLACK_LIST').split()
 
 global phonedb
 phonedb = {}
@@ -78,7 +78,7 @@ loop = asyncio.new_event_loop()
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
     """Check that the sender is not in the black or white list."""
     if white_list and message.get_sender_contact().addr not in white_list:       
-        return True
+       return True
     if black_list and message.get_sender_contact().addr in black_list:
        return True
     return None
