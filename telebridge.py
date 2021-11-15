@@ -66,12 +66,6 @@ auto_load_task = None
 
 loop = asyncio.new_event_loop()
 
-def start_background_loop(bridge_initialized: Event) -> None:
-    global tloop
-    tloop = asyncio.new_event_loop()
-    bridge_initialized.set()
-    tloop.run_forever()
-
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
     bot.account.set_config("displayname","Telegram Bridge")
@@ -134,7 +128,7 @@ async def convertsticker(infilepath,outfilepath):
        print_dep_message(exporters)
 
     an = importer.process(infilepath)
-    exporter.process(an, outfilepath, quality=5, skip_frames=30, dpi=5)
+    exporter.process(an, outfilepath, lossless=False, method=0, quality=5, skip_frames=30, dpi=5)
     
     
 async def forward_message(message, replies, payload):
@@ -578,7 +572,7 @@ def async_click_button(bot, message, replies, payload):
     """Make click on a message bot button"""
     loop.run_until_complete(click_button(message = message, replies = replies, payload = payload))
     parametros = payload.split()
-    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0]))
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0], dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
     contacto = dc_contact
@@ -728,7 +722,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-                        
+              down_button = "\nDescargar: /down_"+str(m.id)+"\nReenviar: /forward_"+str(m.id)+"_DirectLinkGeneratorbot\nReenviar: /forward_"+str(m.id)+"_aiouploaderbot"          
               #check if message have document
               if hasattr(m,'document') and m.document:
                  if m.document.size<512000 or (is_down and m.document.size<20971520):
@@ -756,7 +750,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               break
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+"\n/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
+                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id)
                  no_media = False
               
               #check if message have media
@@ -775,14 +769,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+"/down_"+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"+html_buttons+msg_id, chat = chat_id)
+                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id)
                     no_media = False
                     
                  #check if message have media webpage  
                  if hasattr(m.media,'webpage') and m.media.webpage:
                     if True:
                        no_media = False
-                       down_button = ''
                        f_size = 0                       
                        if hasattr(m.media.webpage,'photo') and m.media.webpage.photo:
                           if hasattr(m.media.webpage.photo,'sizes') and m.media.webpage.photo.sizes and len(m.media.webpage.photo.sizes)>1:
@@ -795,17 +788,18 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
                                 #print('Foto web muy grande!')
-                                down_button = '\n[FOTO WEB] '+sizeof_fmt(f_size)+'\n/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
+                                down_button = '\n[FOTO WEB] '+sizeof_fmt(f_size)+down_button
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'document') and m.media.webpage.document:
                           if hasattr(m.media.webpage.document,'size') and m.media.webpage.document.size:
-                             if m.media.webpage.document.size<512000 or (is_down and m.media.webpage.document.size<20971520):
+                             f_size = m.media.webpage.document.size
+                             if f_size<512000 or (is_down and f_size<20971520):
                                 #print('Descargando archivo web...')    
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
                                 #print('Archivo web muy grande!')
-                                down_button = '\n[ARCHIVO WEB]/down_'+str(m.id)+"\n/forward_"+str(m.id)+"_DirectLinkGeneratorbot"
+                                down_button = '\n[ARCHIVO WEB] '+sizeof_fmt(f_size)+down_button
                                 file_attach = ''
                        
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
@@ -822,7 +816,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
                        
                        if file_attach!= '':
-                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                        else:
                           myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, chat = chat_id)
                     else:
@@ -951,7 +945,7 @@ async def send_cmd(message, replies, payload):
 def async_send_cmd(bot, message, replies, payload):
     """Send command to telegram chats. Example /b /help"""
     loop.run_until_complete(send_cmd(message, replies, payload))
-    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=''))
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload='', dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
 async def inline_cmd(bot, message, replies, payload):
@@ -1080,7 +1074,6 @@ async def inline_cmd(bot, message, replies, payload):
 def async_inline_cmd(bot, message, replies, payload):
     """Search command for inline telegram bots. Example /inline gif dogs"""
     loop.run_until_complete(inline_cmd(bot, message, replies, payload))
-    #loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=''))
 
 
 async def search_chats(bot, message, replies, payload):
@@ -1275,10 +1268,10 @@ async def auto_load(bot, message, replies):
                    except:
                       code = str(sys.exc_info())
                       print(code)
+                   time.sleep(0.125) 
         except:
            print('Error in autochatsdb dict')
         time.sleep(15)
-        #await asyncio.sleep(15)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
@@ -1338,6 +1331,13 @@ def sizeof_fmt(num: float) -> str:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.1f%s%s" % (num, "Yi", suffix)
+
+
+def start_background_loop(bridge_initialized: Event) -> None:
+    global tloop
+    tloop = asyncio.new_event_loop()
+    bridge_initialized.set()
+    tloop.run_forever()
 
 
 class TestEcho:
