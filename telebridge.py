@@ -724,11 +724,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if isinstance(m.action, types.MessageActionPinMessage):
                     mservice += '_Ancló el mensaje_\n'
                  elif isinstance(m.action, types.MessageActionChatAddUser):
-                    mservice += '_Agregó un usuario_\n'
-                 elif isinstance(m.action, types.MessageActionChatJoinedByLink):
                     mservice += '_Se unió al grupo_\n'
+                 elif isinstance(m.action, types.MessageActionChatJoinedByLink):
+                    mservice += '_Se unió al grupo usando un enlace de invitación_\n'
                  elif isinstance(m.action, types.MessageActionChatDeleteUser):
-                    mservice += '_Eliminó un usuario_\n'
+                    mservice += '_Salió del grupo_\n'
                  elif isinstance(m.action, types.MessageActionChannelCreate):
                     mservice += '_Se creo el grupo/canal_\n'   
                     
