@@ -1,6 +1,7 @@
 import simplebot
 from simplebot.bot import DeltaBot, Replies
 from deltachat import Chat, Contact, Message
+from typing import Optional
 import sys
 import os
 from telethon.sessions import StringSession
@@ -34,7 +35,14 @@ api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
+white_list = None
+black_list = None
 
+#use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
+if os.getenv('WHITE_LIST'):
+   white_list = os.getenv('WHITE_LIST').strip()
+elif os.getenv('BLACK_LIST'):
+   black_list = os.getenv('BLACK_LIST').strip()
 
 global phonedb
 phonedb = {}
@@ -65,6 +73,15 @@ global auto_load_task
 auto_load_task = None
 
 loop = asyncio.new_event_loop()
+
+@simplebot.hookimpl(tryfirst=True)
+def deltabot_incoming_message(message, replies) -> Optional[bool]:
+    """Check that the sender is not in the black or white list."""
+    if white_list and message.get_sender_contact().addr not in white_list:       
+        return True
+    if black_list and message.get_sender_contact().addr in black_list:
+       return True
+    return None
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
@@ -348,6 +365,8 @@ def logout_tg(payload, replies, message):
 
 async def login_num(payload, replies, message):
     try:
+       if message.chat.is_group():
+          return
        forzar_sms = False 
        parametros = payload.split()
        if len(parametros)<1:
@@ -377,6 +396,8 @@ def async_login_num(payload, replies, message):
 
 async def login_code(payload, replies, message):
     try:
+       if message.chat.is_group():
+          return
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb:
           try:
               me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)
@@ -403,6 +424,8 @@ def async_login_code(payload, replies, message):
 
 async def login_2fa(payload, replies, message):
     try:
+       if message.chat.is_group():
+          return
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
           me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)
           logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
@@ -429,6 +452,8 @@ def async_login_2fa(payload, replies, message):
        async_load_delta_chats(message = message, replies = replies)
 
 async def login_session(payload, replies, message):
+    if message.chat.is_group():
+       return
     if message.get_sender_contact().addr not in logindb:
        try:
            hash = payload.replace(' ','_')
@@ -697,15 +722,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'action') and m.action:
                  mservice = '_system message_\n'
                  if isinstance(m.action, types.MessageActionPinMessage):
-                    mservice += 'Anclo un mensaje!'
+                    mservice += '_Ancló el mensaje_\n'
                  elif isinstance(m.action, types.MessageActionChatAddUser):
-                    mservice += 'Agrego un usuario!'
+                    mservice += '_Agregó un usuario_\n'
                  elif isinstance(m.action, types.MessageActionChatJoinedByLink):
-                    mservice += 'Se unio al grupo!'
+                    mservice += '_Se unió al grupo_\n'
                  elif isinstance(m.action, types.MessageActionChatDeleteUser):
-                    mservice += 'Elimino un usuario!'
+                    mservice += '_Eliminó un usuario_\n'
                  elif isinstance(m.action, types.MessageActionChannelCreate):
-                    mservice += 'Se creo el grupo/canal!'   
+                    mservice += '_Se creo el grupo/canal_\n'   
                     
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
@@ -758,7 +783,6 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        for attr in m.document.attributes:
                            if hasattr(attr,'file_name') and attr.file_name:
                               file_title = attr.file_name
-                              break
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
                     myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id)
@@ -817,7 +841,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wtitle = m.media.webpage.title
                        else:
                           wtitle = ''
-                       if m.message:
+                       if text_message!='':
                           wmessage=str(text_message)+'\n'
                        else:
                           wmessage=''
@@ -893,25 +917,43 @@ async def echo_filter(message, replies):
           target = int(id_chat)
        else:
           target = id_chat
+       mquote = ''
+       if message.quote:
+          if message.quote.is_gif():
+             mquote += '[GIF]'
+          elif message.quote.is_image():
+             mquote += '[PHOTO]'
+          elif message.quote.is_audio():
+              mquote += '[AUDIO]'
+          elif message.quote.is_video():
+              mquote += '[VIDEO]'
+          elif message.quote.is_file():
+              mquote += '[FILE]'                
+          mquote += ' '+message.quote.text
+          if len(mquote)>65:
+             mquote = mquote[0:65]+'...'
+             
+          mquote = '>'+mquote.replace('\n','\n>')+'\n\n'
+       mtext = mquote+message.text     
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
              await client.send_file(target, message.filename, voice_note=True)
           else:
-             if len(message.text) > 1024:
-                await client.send_file(target, message.filename, caption = message.text[0:1024])    
-                for x in range(1024, len(message.text), 1024):
-                    await client.send_message(target, message.text[x:x+1024])
+             if len(mtext) > 1024:
+                await client.send_file(target, message.filename, caption = mtext[0:1024])    
+                for x in range(1024, len(mtext), 1024):
+                    await client.send_message(target, mtext[x:x+1024])
              else:       
-                await client.send_file(target, message.filename, caption = message.text)
+                await client.send_file(target, message.filename, caption = mtext)
        else:
-          if len(message.text) > 4096:
-             for x in range(0, len(message.text), 4096): 
-                 await client.send_message(target, message.text[x:x+4096])
+          if len(mtext) > 4096:
+             for x in range(0, len(mtext), 4096): 
+                 await client.send_message(target, mtext[x:x+4096])
           else:
-             await client.send_message(target,message.text)
+             await client.send_message(target,mtext)
        await client.disconnect()
     except:
-       await client(SendMessageRequest(target, message.text))
+       await client(SendMessageRequest(target, mtext))
        code = str(sys.exc_info())
        replies.add(text=code)
 
