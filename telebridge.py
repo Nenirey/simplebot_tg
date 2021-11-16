@@ -38,6 +38,9 @@ admin_addr = os.getenv('ADMIN')
 white_list = None
 black_list = None
 
+MAX_SIZE_DOWN = 10485760
+MIN_SIZE_DOWN = 655360
+
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
    white_list = os.getenv('WHITE_LIST').split()
@@ -87,7 +90,7 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
 def deltabot_init(bot: DeltaBot) -> None:
     bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar('telegram.jpeg')
-    bot.account.set_config("mdns_enabled","0")
+    bot.account.set_config("mdns_enabled","0")  
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -502,10 +505,11 @@ async def updater(bot, payload, replies, message):
        all_chats = await client.get_dialogs(ignore_migrated = True)
        chats_limit = 5
        filtro = payload.replace(' ','_')
+       filtro = filtro.replace('@','')
        ya_agregados = '' 
        replies.add(text = 'Obteniendo chats...'+filtro)
        for d in all_chats:
-           if hasattr(d.entity,'username'):
+           if hasattr(d.entity,'username') and d.entity.username:
               uname = str(d.entity.username)
            else:
               uname = 'None'
@@ -519,7 +523,7 @@ async def updater(bot, payload, replies, message):
            else:
               private_only = False
            if payload!='' and payload.lower()!='#privates':
-              if ttitle.lower().find(payload.lower())>=0 or tid is payload or uname.lower() is filtro.lower():
+              if ttitle.lower().find(payload.lower())>=0 or tid == payload or uname.lower() == filtro.lower():
                  find_only = False
               else:
                  find_only = True
@@ -761,7 +765,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               down_button = "\nDescargar: /down_"+str(m.id)+"\nReenviar: /forward_"+str(m.id)+"_DirectLinkGeneratorbot\nReenviar: /forward_"+str(m.id)+"_aiouploaderbot"          
               #check if message have document
               if hasattr(m,'document') and m.document:
-                 if m.document.size<512000 or (is_down and m.document.size<20971520):
+                 if m.document.size<MIN_SIZE_DOWN or (is_down and m.document.size<MAX_SIZE_DOWN):
                     #print('Descargando archivo...')
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
@@ -798,7 +802,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                            if hasattr(sz,'size') and sz.size:
                               f_size = sz.size
                               break
-                    if f_size<512000 or (is_down and f_size<20971520):
+                    if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...') 
                        file_attach = await client.download_media(m.media, contacto)
                        myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
@@ -818,7 +822,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                  if hasattr(sz,'size') and sz.size:
                                     f_size = sz.size
                                     break
-                             if f_size<512000 or (is_down and f_size<20971520):
+                             if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                                 #print('Descargando foto web...')
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
@@ -829,7 +833,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        if hasattr(m.media.webpage,'document') and m.media.webpage.document:
                           if hasattr(m.media.webpage.document,'size') and m.media.webpage.document.size:
                              f_size = m.media.webpage.document.size
-                             if f_size<512000 or (is_down and f_size<20971520):
+                             if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                                 #print('Descargando archivo web...')    
                                 file_attach = await client.download_media(m.media, contacto)
                              else:
@@ -849,11 +853,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = m.media.webpage.url
                        else:
                           wurl = ''
-                       
+      
                        if file_attach!= '':
                           myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
                        else:
-                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+down_button+html_buttons+msg_id, chat = chat_id)
+                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id)
                     else:
                        no_media = True
                    
@@ -1196,10 +1200,10 @@ async def join_chats(bot, message, replies, payload):
         replies.add(text=code)
 
 def async_join_chats(bot, message, replies, payload):
-    """Join to telegram chats by username or private link. Example: /join @usernamegroup
+    """Join to telegram chats by username or private link. Example: /join usernamegroup
     or /join https://t.me/joinchat/invitehashtoprivatechat"""
     loop.run_until_complete(join_chats(bot = bot, message = message, replies = replies, payload = payload))
-    loop.run_until_complete(updater(bot=bot, payload=payload.replace('@',''), replies=replies, message=message))
+    loop.run_until_complete(updater(bot=bot, payload=payload, replies=replies, message=message))
     if message.get_sender_contact().addr in logindb:
        async_save_delta_chats(replies = replies, message = message)
 
@@ -1324,7 +1328,7 @@ async def auto_load(bot, message, replies):
                    time.sleep(0.125) 
         except:
            print('Error in autochatsdb dict')
-        time.sleep(15)
+        time.sleep(10)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
@@ -1334,9 +1338,9 @@ def start_updater(bot, message, replies):
     if auto_load_task:
        if auto_load_task.done():
           is_done = True
-          replies.add(text='Las autodescargas ya se estan ejecutando!')
        else:
           is_done = False
+          replies.add(text='Las autodescargas ya se estan ejecutando!')  
     if is_done:
        auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = message, replies = replies),tloop)
        replies.add(text='Las autodescargas se han iniciado!')
