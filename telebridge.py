@@ -80,9 +80,11 @@ loop = asyncio.new_event_loop()
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
     """Check that the sender is not in the black or white list."""
-    if white_list and message.get_sender_contact().addr not in white_list:       
+    if white_list and message.get_sender_contact().addr not in white_list:
+       print('Usuario '+str(message.get_sender_contact().addr)+' no esta en la lista blanca')
        return True
     if black_list and message.get_sender_contact().addr in black_list:
+       print('Usuario '+str(message.get_sender_contact().addr)+' esta en la lista negra')  
        return True
     return None
 
