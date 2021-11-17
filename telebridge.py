@@ -1,9 +1,11 @@
 import simplebot
+import deltachat
 from simplebot.bot import DeltaBot, Replies
 from deltachat import Chat, Contact, Message
 from typing import Optional
 import sys
 import os
+import psutil
 from telethon.sessions import StringSession
 from telethon import TelegramClient as TC
 from telethon import functions, types
@@ -87,6 +89,13 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
        print('Usuario '+str(message.get_sender_contact().addr)+' esta en la lista negra')  
        return True
     return None
+
+@simplebot.hookimpl
+def deltabot_member_added(chat, contact, actor, message, replies, bot) -> None:
+    if actor:
+       print('Miembro '+str(contact.addr)+' agregado por '+str(actor.addr)+' chat: '+str(chat.get_name()))
+    else:
+       print('My self!')
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
@@ -1381,6 +1390,28 @@ async def c_run(payload, replies, message):
 def async_run(payload, replies, message):
     """Run command inside a async TelegramClient def. Note that all code run with await prefix, results are maybe a coorutine. Example: /exec client.get_me()"""
     loop.run_until_complete(c_run(payload, replies, message))
+   
+@simplebot.command(admin=True)
+def stats(replies) -> None:
+    """Get bot and computer state."""
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk = psutil.disk_usage(os.path.expanduser("~/.simplebot/"))
+    proc = psutil.Process()
+    botmem = proc.memory_full_info()
+    replies.add(
+        text="**🖥️ Computer Stats:**\n"
+        f"CPU: {psutil.cpu_percent(interval=0.1)}%\n"
+        f"Memory: {sizeof_fmt(mem.used)}/{sizeof_fmt(mem.total)}\n"
+        f"Swap: {sizeof_fmt(swap.used)}/{sizeof_fmt(swap.total)}\n"
+        f"Disk: {sizeof_fmt(disk.used)}/{sizeof_fmt(disk.total)}\n\n"
+        "**🤖 Bot Stats:**\n"
+        f"CPU: {proc.cpu_percent(interval=0.1)}%\n"
+        f"Memory: {sizeof_fmt(botmem.rss)}\n"
+        f"Swap: {sizeof_fmt(botmem.swap if 'swap' in botmem._fields else 0)}\n"
+        f"SimpleBot: {simplebot.__version__}\n"
+        f"DeltaChat: {deltachat.__version__}\n"
+    )   
 
 def sizeof_fmt(num: float) -> str:
     """Format size in human redable form."""
