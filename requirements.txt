@@ -11,6 +11,7 @@ requests
 git+https://github.com/Nenirey/Telethon@master#telethon
 git+https://github.com/simplebot-org/simplebot@master#simplebot
 mock
+psutil
 git+https://gitlab.com/mattbas/python-lottie@master#lottie
 pillow
 cairosvg
