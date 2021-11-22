@@ -65,7 +65,9 @@ global logindb
 logindb = {}
 
 global messagedb
+#{contac_addr:{dc_id:{dc_msg:tg_msg}}}
 messagedb = {}
+
 
 global autochatsdb
 #{contact_addr:{dc_id:tg_id}}
@@ -137,7 +139,44 @@ def deltabot_start(bot: DeltaBot) -> None:
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
     bot.get_chat(admin_addr).send_text('El bot '+bot.account.get_config('addr')+' se ha iniciado correctamente')
-
+   
+def register_msg(contacto, dc_id, dc_msg, tg_msg):
+   global messagedb
+   #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
+   if contacto not in messagedb:
+      messagedb[contacto] = {}   
+   if dc_id not in messagedb[contacto]:
+      messagedb[contacto][dc_id] = {}
+      
+   messagedb[contacto][dc_id][dc_msg] = tg_msg
+   
+def is_register_msg(contacto, dc_id, dc_msg):
+   if contacto in messagedb:
+      if dc_id in messagedb[contacto]:
+         if dc_msg in messagedb[contacto][dc_id]:
+            t_reply = messagedb[contacto][dc_id][dc_msg]
+            return t_reply
+         else:
+            return
+      else:
+         return
+   else:
+      return
+      
+def find_register_msg(contacto, dc_id, tg_msg):
+   if contacto in messagedb:
+      if dc_id in messagedb[contacto]:
+         if tg_msg in messagedb[contacto][dc_id].values():
+            for (key, value) in messagedb[contacto][dc_id].items():
+                if value == tg_msg:
+                   d_reply = key
+                   return d_reply
+         else:
+            return
+      else:
+         return
+   else:
+      return
     
 def print_dep_message(loader):
     if not loader.failed_modules:
@@ -160,7 +199,7 @@ async def convertsticker(infilepath,outfilepath):
 
     an = importer.process(infilepath)
     exporter.process(an, outfilepath, lossless=False, method=0, quality=5, skip_frames=30, dpi=5)
-    
+ 
     
 async def forward_message(message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
@@ -688,6 +727,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        for m in all_messages:
            if m and limite<max_limit:
               mquote = ''
+              quote = None 
               mservice = ''
               file_attach = ''
               file_title = '[ARCHIVO]'
@@ -708,30 +748,37 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
                  if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
-                    mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
-                    if mensaje and mensaje[0]:
-                       reply_text = ''
-                       if hasattr(mensaje[0],'sender') and mensaje[0].sender and hasattr(mensaje[0].sender,'first_name') and mensaje[0].sender.first_name:
-                          if mensaje[0].sender.first_name:
-                             first_name= mensaje[0].sender.first_name
+                    dc_mid = find_register_msg(contacto, dc_id, m.reply_to.reply_to_msg_id)
+                    if dc_mid:
+                       all_dc_msg = chat_id.get_messages()
+                       for dcm in all_dc_msg:
+                           if dcm.id == dc_mid:
+                              quote = dcm
+                    else: 
+                       mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
+                       if mensaje and mensaje[0]:
+                          reply_text = ''
+                          if hasattr(mensaje[0],'sender') and mensaje[0].sender and hasattr(mensaje[0].sender,'first_name') and mensaje[0].sender.first_name:
+                             if mensaje[0].sender.first_name:
+                                first_name= mensaje[0].sender.first_name
+                             else:
+                                first_name= ""
+                             if mensaje[0].sender.last_name:
+                                last_name= mensaje[0].sender.last_name
+                             else:
+                                last_name= ""
+                             reply_send_by = str((first_name + ' ' + last_name).strip())+": "
                           else:
-                             first_name= ""
-                          if mensaje[0].sender.last_name:
-                             last_name= mensaje[0].sender.last_name
-                          else:
-                             last_name= ""
-                          reply_send_by = str((first_name + ' ' + last_name).strip())+": "
-                       else:
-                          reply_send_by = ""
-                       if hasattr(mensaje[0],'media') and mensaje[0].media:
-                          if hasattr(mensaje[0].media,'photo'):
-                             reply_text += '[FOTO]'
-                       if hasattr(mensaje[0],'document') and mensaje[0].document:
-                          reply_text += '[ARCHIVO]'
-                       reply_text += str(mensaje[0].text)
-                       if len(reply_text)>60:
-                          reply_text = reply_text[0:60]+'...'
-                       mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
+                             reply_send_by = ""
+                          if hasattr(mensaje[0],'media') and mensaje[0].media:
+                             if hasattr(mensaje[0].media,'photo'):
+                                reply_text += '[FOTO]'
+                          if hasattr(mensaje[0],'document') and mensaje[0].document:
+                             reply_text += '[ARCHIVO]'
+                          reply_text += str(mensaje[0].text)
+                          if len(reply_text)>60:
+                             reply_text = reply_text[0:60]+'...'
+                          mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
                     
               #check if message is a system message
               if hasattr(m,'action') and m.action:
@@ -791,7 +838,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           tipo = "sticker"                            
                     except:
                        print('Error converting tgs file '+str(file_attach)) 
-                    myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id)
+                    myreplies.add(text = mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -800,7 +847,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id)
+                    myreplies.add(text = mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
                  no_media = False
               
               #check if message have media
@@ -816,10 +863,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...') 
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                       myreplies.add(text = mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id)
+                       myreplies.add(text = mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
                     no_media = False
                     
                  #check if message have media webpage  
@@ -866,23 +913,24 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
       
                        if file_attach!= '':
-                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id)
+                          myreplies.add(text = mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
                        else:
-                          myreplies.add(text = send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id)
+                          myreplies.add(text = mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id, quote = quote)
                     else:
                        no_media = True
                    
               #send only text message
               if no_media:
-                 myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id)
+                 myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id, quote = quote)
               
               #mark message as read                                                            
               m_id = m.id
-              print('Leyendo mensaje '+str(m_id))             
+              print('Leyendo mensaje '+str(m_id))
+              dc_msg = myreplies.send_reply_messages()[0].id
               if file_attach!='' and os.path.exists(file_attach):
-                 myreplies.send_reply_messages()
                  os.remove(file_attach) 
               limite+=1
+              register_msg(contacto, dc_id, dc_msg, m_id)          
               await m.mark_read()
            else:
               if not load_history and not is_auto:
@@ -898,6 +946,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     except:
        code = str(sys.exc_info())
        myreplies.add(text=code, chat = chat_id)
+       myreplies.send_reply_messages()
 
 
 def async_load_chat_messages(bot, message, replies, payload):
@@ -932,40 +981,50 @@ async def echo_filter(message, replies):
           target = int(id_chat)
        else:
           target = id_chat
+                 
        mquote = ''
+       t_reply = None
        if message.quote:
-          if message.quote.is_gif():
-             mquote += '[GIF]'
-          elif message.quote.is_image():
-             mquote += '[PHOTO]'
-          elif message.quote.is_audio():
-              mquote += '[AUDIO]'
-          elif message.quote.is_video():
-              mquote += '[VIDEO]'
-          elif message.quote.is_file():
-              mquote += '[FILE]'                
-          mquote += ' '+message.quote.text
-          if len(mquote)>65:
-             mquote = mquote[0:65]+'...'
-             
-          mquote = '>'+mquote.replace('\n','\n>')+'\n\n'
+          t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+          if not t_reply:        
+             if message.quote.is_gif():
+                mquote += '[GIF]'
+             elif message.quote.is_image():
+                mquote += '[PHOTO]'
+             elif message.quote.is_audio():
+                 mquote += '[AUDIO]'
+             elif message.quote.is_video():
+                 mquote += '[VIDEO]'
+             elif message.quote.is_file():
+                 mquote += '[FILE]'                
+             mquote += ' '+message.quote.text
+             if len(mquote)>65:
+                mquote = mquote[0:65]+'...'            
+             mquote = '>'+mquote.replace('\n','\n>')+'\n\n'
+         
        mtext = mquote+message.text     
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
-             await client.send_file(target, message.filename, voice_note=True)
+              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply)
+              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)  
           else:
              if len(mtext) > 1024:
-                await client.send_file(target, message.filename, caption = mtext[0:1024])    
-                for x in range(1024, len(mtext), 1024):
-                    await client.send_message(target, mtext[x:x+1024])
+                 m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply)
+                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                 for x in range(1024, len(mtext), 1024):
+                     m = await client.send_message(target, mtext[x:x+1024])
+                     register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id) 
              else:       
-                await client.send_file(target, message.filename, caption = mtext)
+                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply)
+                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)  
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096): 
-                 await client.send_message(target, mtext[x:x+4096])
+                 m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply)
+                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id) 
           else:
-             await client.send_message(target,mtext)
+             m = await client.send_message(target,mtext, reply_to = t_reply)
+             register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)  
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, mtext))
