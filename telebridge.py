@@ -749,11 +749,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'reply_to') and m.reply_to:
                  if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
                     dc_mid = find_register_msg(contacto, dc_id, m.reply_to.reply_to_msg_id)
-                    if dc_mid:
-                       all_dc_msg = chat_id.get_messages()
-                       for dcm in all_dc_msg:
-                           if dcm.id == dc_mid:
-                              quote = dcm
+                    if dc_mid:               
+                       quote = bot.account.get_message_by_id(dc_mid)                 
                     else: 
                        mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
                        if mensaje and mensaje[0]:
