@@ -5,6 +5,7 @@ from deltachat import Chat, Contact, Message
 from typing import Optional
 import sys
 import os
+from os.path import expanduser
 import psutil
 from telethon.sessions import StringSession
 from telethon import TelegramClient as TC
@@ -24,6 +25,7 @@ import asyncio
 import re
 import time
 import json
+import urllib.parse
 from datetime import datetime
 from threading import Event, Thread
 #For telegram sticker stuff
@@ -31,12 +33,17 @@ import lottie
 from lottie.importers import importers
 from lottie.exporters import exporters
 from lottie.utils.stripper import float_strip, heavy_strip
+#For secure cloud storage
+import dropbox
+from dropbox.files import WriteMode
+from dropbox.exceptions import ApiError, AuthError
 
 version = "0.1.6"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
+bot_home = expanduser("~")
 white_list = None
 black_list = None
 
@@ -79,7 +86,80 @@ chatdb = {}
 global auto_load_task
 auto_load_task = None
 
+global encode_bot_addr
+encode_bot_addr = ''
+
 loop = asyncio.new_event_loop()
+
+#Secure save storage to use in non persistent storage
+DBXTOKEN = os.getenv('DBXTOKEN')
+global LOGINFILE
+LOGINFILE = ''
+if DBXTOKEN:
+   dbx = dropbox.Dropbox(DBXTOKEN)
+   # Check that the access token is valid
+   try:
+      dbx.users_get_current_account()
+   except AuthError:
+       sys.exit("ERROR: Invalid access token; try re-generating an "
+                "access token from the app console on the web.")
+
+def backup(backup_path):
+    with open(backup_path, 'rb') as f:
+        print("Uploading " + backup_path + " to Dropbox...")
+        if backup_path.startswith('.'):
+           dbx_backup_path = backup_path.replace('.','',1)
+        else:
+           dbx_backup_path =backup_path
+        try:
+            dbx.files_upload(f.read(), dbx_backup_path, mode=WriteMode('overwrite'))
+        except ApiError as err:
+            # This checks for the specific error where a user doesn't have
+            # enough Dropbox space quota to upload this file
+            if (err.error.is_path() and
+                    err.error.get_path().reason.is_insufficient_space()):
+                sys.exit("ERROR: Cannot back up; insufficient space.")
+            elif err.user_message_text:
+                print(err.user_message_text)
+                sys.exit()
+            else:
+                print(err)
+                sys.exit()
+
+def restore(backup_path):
+    print("Downloading current " + backup_path + " from Dropbox, overwriting...")
+    if not os.path.exists(os.path.dirname(backup_path)):
+        os.makedirs(os.path.dirname(backup_path))
+    try:
+       if backup_path.startswith('.'):
+           dbx_backup_path = backup_path.replace('.','',1)
+       else:
+           dbx_backup_path =backup_path
+       metadata, res = dbx.files_download(path = dbx_backup_path)
+       f = open(backup_path, 'wb')
+       f.write(res.content)
+       f.close()
+    except:
+       print('Error in restore '+backup_path)
+
+def savelogin():
+    if not os.path.exists(os.path.dirname(LOGINFILE)):
+       os.makedirs(os.path.dirname(LOGINFILE))
+    tf = open(LOGINFILE, 'w')
+    json.dump(logindb, tf)
+    tf.close()
+    backup(LOGINFILE)
+
+def loadlogin():
+    restore(LOGINFILE)
+    if os.path.isfile(LOGINFILE):
+       tf = open(LOGINFILE,'r')
+       global logindb
+       logindb=json.load(tf)
+       tf.close()
+    else:
+       print("File "+LOGINFILE+" not exists!!!")
+#end secure save storage
 
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
@@ -138,7 +218,16 @@ def deltabot_start(bot: DeltaBot) -> None:
     bridge_init.wait()
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
-    bot.get_chat(admin_addr).send_text('El bot '+bot.account.get_config('addr')+' se ha iniciado correctamente')
+    bot_addr = bot.account.get_config('addr')
+    global encode_bot_addr
+    encode_bot_addr = urllib.parse.quote(bot_addr, safe='')
+    if admin_addr:
+       bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
+    global LOGINFILE
+    LOGINFILE = './'+encode_bot_addr+'/logindb.json'
+    if DBXTOKEN:
+       loadlogin()
+
    
 def register_msg(contacto, dc_id, dc_msg, tg_msg):
    global messagedb
@@ -412,6 +501,8 @@ def logout_tg(payload, replies, message):
        del logindb[message.get_sender_contact().addr]
        if message.get_sender_contact().addr in autochatsdb:
           autochatsdb[message.get_sender_contact().addr].clear()
+       if DBXTOKEN:
+          savelogin()
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
@@ -433,7 +524,12 @@ async def login_num(payload, replies, message):
              forzar_sms = True
        clientdb[message.get_sender_contact().addr] = TC(StringSession(), api_id, api_hash)
        await clientdb[message.get_sender_contact().addr].connect()
-       me = await clientdb[message.get_sender_contact().addr].send_code_request(parametros[0], force_sms = forzar_sms)
+       try:
+          me = await clientdb[message.get_sender_contact().addr].send_code_request(parametros[0], force_sms = forzar_sms)
+       except errors.FloodWaitError as e:
+          print(e)
+          replies.add(text = 'Atencion!\nHa solicitado demasiadas veces el codigo y Telegram le ha penalizado con '+str(e.seconds)+' segundos de espera para poder solicitar nuevamente el codigo!')
+          return
        hashdb[message.get_sender_contact().addr] = me.phone_code_hash
        phonedb[message.get_sender_contact().addr] = parametros[0]
        replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+parametros[0]+', puede que le llegue a su cliente de Telegram o reciba una llamada, por favor introdusca /sms CODIGO para iniciar')
@@ -455,6 +551,8 @@ async def login_code(payload, replies, message):
           try:
               me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)
               logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+              if DBXTOKEN:
+                 savelogin()
               replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
               await clientdb[message.get_sender_contact().addr].disconnect()
               del clientdb[message.get_sender_contact().addr]
@@ -482,6 +580,8 @@ async def login_2fa(payload, replies, message):
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
           me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)
           logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+          if DBXTOKEN:
+             savelogin()
           replies.add(text = 'Se ha iniciado sesiòn correctamente, su token es:\n\n'+logindb[message.get_sender_contact().addr]+'\n\nUse /token mas este token para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats')
           await clientdb[message.get_sender_contact().addr].disconnect()
           del clientdb[message.get_sender_contact().addr]
@@ -523,8 +623,10 @@ async def login_session(payload, replies, message):
               last_name= ""
            nombre= (first_name + ' ' + last_name).strip()
            await client.disconnect()
-           replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
            logindb[message.get_sender_contact().addr] = hash
+           if DBXTOKEN:
+              savelogin()
+           replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
        except:
           code = str(sys.exc_info())
           print(code)
@@ -925,7 +1027,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               print('Leyendo mensaje '+str(m_id))
               dc_msg = myreplies.send_reply_messages()[0].id
               if file_attach!='' and os.path.exists(file_attach):
-                 os.remove(file_attach) 
+                 os.remove(file_attach)
+                 head, tail = os.path.split(file_attach)
+                 bot_attach = bot_home+'/.simplebot/accounts/'+encode_bot_addr+'/account.db-blobs/'+str(tail)
+                 if os.path.exists(bot_attach):
+                    os.remove(bot_attach)
               limite+=1
               register_msg(contacto, dc_id, dc_msg, m_id)          
               await m.mark_read()
