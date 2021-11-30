@@ -235,6 +235,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/list" ,func = list_chats)
     bot.commands.register(name = "/forward" ,func = async_forward_message)
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
+    bot.commands.register(name = "/news" ,func = async_chat_news)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -319,6 +320,71 @@ async def convertsticker(infilepath,outfilepath):
     an = importer.process(infilepath)
     exporter.process(an, outfilepath, lossless=False, method=0, quality=5, skip_frames=30, dpi=5)
 
+async def chat_news(bot, payload, replies, message):
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para ver sus chats!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       chatdb[message.get_sender_contact().addr] = {}
+    try:
+       if not os.path.exists(message.get_sender_contact().addr):
+          os.mkdir(message.get_sender_contact().addr)
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       me = await client.get_me()
+       my_id = me.id
+       all_chats = await client.get_dialogs(ignore_migrated = True)
+       chat_list = ''
+       for d in all_chats:
+           if hasattr(d.entity,'username') and d.entity.username:
+              uname = str(d.entity.username)
+           else:
+              uname = 'None'
+           ttitle = "Unknown"
+           last_message = ""
+           send_by = "\n"
+           if hasattr(d,'title'):
+              ttitle = d.title
+           tid = str(d.id)
+           if True:
+              titulo = str(ttitle)
+              if my_id == d.id:
+                 titulo = 'Mensajes guardados'
+              if str(d.id) in chatdb[message.get_sender_contact().addr]:
+                 comando = '\n❌ Desvilcular: /remove_'+str(d.id)
+              else:
+                 comando = '\n✅ Cargar: /load_'+str(d.id)
+
+              if hasattr(d,'message') and d.message:
+                 if hasattr(d.message,'from_id') and d.message.from_id:
+                    if hasattr(d.message.from_id,'user_id') and d.message.from_id.user_id:
+                       try:
+                          full_pchat = await client(functions.users.GetFullUserRequest(id = d.message.from_id.user_id))
+                          if hasattr(full_pchat,'user') and full_pchat.user:
+                             send_by = '\n'+full_pchat.user.first_name+': '
+                       except:
+                          print('Error obteniendo entidad '+str(uid))
+                          pchat = await client.get_entity(uid)
+                          if hasattr(pchat, 'first_name') and pchat.first_name:
+                             send_by = '\n'+str(pchat.first_name)+': '
+                 if hasattr(d.message,'message') and d.message.message:
+                    last_message += send_by
+                    last_message += d.message.message.replace('\n',' ')
+                    if len(last_message)>40:
+                       last_message = last_message[0:40]+'...'
+                    else:
+                       last_message = last_message
+              chat_list += '\n\n'+titulo+' ('+str(d.unread_count)+' sin leer)'+last_message+comando
+              #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
+       await client.disconnect()
+       replies.add(text=chat_list)
+    except:
+       code = str(sys.exc_info())
+       replies.add(text=code)
+
+def async_chat_news(bot, payload, replies, message):
+    """See a list of all your chats status/unread from telegram. Example: /news"""
+    loop.run_until_complete(chat_news(bot, payload, replies, message))
 
 async def pin_messages(message, replies):
     dchat = message.chat.get_name()
@@ -1294,8 +1360,7 @@ async def inline_cmd(bot, message, replies, payload):
           results = await client.inline_query(bot = inline_bot, query = inline_search, entity = target)
        else:
           results = await client.inline_query(bot = inline_bot, query = inline_search)
-       resultado = ''
-       
+
        limite = 0
        if len(results)<1:
           replies.add('La busqueda no arrojó ningun resultado.')  
@@ -1303,6 +1368,7 @@ async def inline_cmd(bot, message, replies, payload):
           return  
        for r in results:
            attach = ''
+           resultado = ''
            tipo = None
            if limite<10:
               if hasattr(r,'title') and r.title:
