@@ -534,7 +534,7 @@ async def add_auto_chats(bot, replies, message):
              del autochatsdb[message.get_sender_contact().addr][message.chat.id]
              replies.add(text='Se ha desactivado la automatizacion en este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
           else:
-             if len(autochatsdb[message.get_sender_contact().addr])>=MAX_AUTO_CHATS:
+             if len(autochatsdb[message.get_sender_contact().addr])>=MAX_AUTO_CHATS and not bot.is_admin(message.get_sender_contact()):
                 autochatsdb[message.get_sender_contact().addr][message.chat.id]=target
                 for (key,_) in autochatsdb[message.get_sender_contact().addr].items():
                     del autochatsdb[message.get_sender_contact().addr][key]
