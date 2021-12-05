@@ -364,8 +364,8 @@ async def chat_news(bot, payload, replies, message):
                           if hasattr(full_pchat,'user') and full_pchat.user:
                              send_by = '\n'+full_pchat.user.first_name+': '
                        except:
-                          print('Error obteniendo entidad '+str(uid))
-                          pchat = await client.get_entity(uid)
+                          print('Error obteniendo entidad '+str(d.message.from_id.user_id))
+                          pchat = await client.get_entity(d.message.from_id.user_id)
                           if hasattr(pchat, 'first_name') and pchat.first_name:
                              send_by = '\n'+str(pchat.first_name)+': '
                  if hasattr(d.message,'message') and d.message.message:
