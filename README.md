@@ -14,7 +14,9 @@ Telegram/DeltaChat Bridge
 - PASSWORD
   - The email bot password 
 - ADMIN
-  - Your own email as bot admin      
+  - Your own email as bot admin
+- DBXTOKEN
+  - Get from [Here](https://www.dropbox.com/developers/apps/create).         
 
 ## Deploy Now:
 [![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/Nenirey/simplebot_tg/tree/main)
