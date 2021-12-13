@@ -1,5 +1,4 @@
 #!/bin/bash
-#!/bin/bash
 BOTPATH="${ADDR/@/"%40"}"
 BOTZIPDB="${ADDR/@/"%40"}.zip"
 BOTDB="$HOME/.simplebot/accounts/$BOTPATH/bot.db"
