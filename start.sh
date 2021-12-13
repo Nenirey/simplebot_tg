@@ -21,5 +21,5 @@ else
       python3 -m simplebot --account "$ADDR" admin --add "$ADMIN"
    fi
 fi
-python3 -m simplebot --account "$ADDR" --show-ffi serve
+python3 -m simplebot --account "$ADDR" serve
 
