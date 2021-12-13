@@ -28,6 +28,7 @@ import json
 import urllib.parse
 from datetime import datetime
 from threading import Event, Thread
+import copy
 #For telegram sticker stuff
 import lottie
 from lottie.importers import importers
@@ -39,7 +40,7 @@ from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError, AuthError
 import zipfile
 
-version = "0.1.5"
+version = "0.1.6"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -97,6 +98,8 @@ loop = asyncio.new_event_loop()
 DBXTOKEN = os.getenv('DBXTOKEN')
 global LOGINFILE
 LOGINFILE = ''
+global AUTOCHATFILE
+AUTOCHATFILE = ''
 if DBXTOKEN:
    dbx = dropbox.Dropbox(DBXTOKEN)
    # Check that the access token is valid
@@ -152,8 +155,8 @@ def zipdir(dir_path,file_path):
         zf.write(dirname)
         print(dirname)
         for filename in files:
-            if filename=='account.db-wal' or filename=='account.db-shm':
-               continue
+            #if filename=='account.db-wal' or filename=='account.db-shm' or filename=='bot.log':
+            #   continue
             print(filename)
             zf.write(os.path.join(dirname, filename))
     zf.close()
@@ -174,6 +177,7 @@ def savelogin():
     tf.close()
     if DBXTOKEN:
        backup(LOGINFILE)
+    os.remove(LOGINFILE)  
 
 def loadlogin():
     if DBXTOKEN:
@@ -183,11 +187,59 @@ def loadlogin():
        global logindb
        logindb=json.load(tf)
        tf.close()
-    for (key,_) in logindb.items():
-        loop.run_until_complete(load_delta_chats(contacto=key))
+       os.remove(LOGINFILE)
+       for (key,_) in logindb.items():
+           loop.run_until_complete(load_delta_chats(contacto=key))
     else:
        print("File "+LOGINFILE+" not exists!!!")
+
+def saveautochats():
+    if not os.path.exists(os.path.dirname(AUTOCHATFILE)):
+       os.makedirs(os.path.dirname(AUTOCHATFILE))
+    tf = open(AUTOCHATFILE, 'w')
+    json.dump(autochatsdb, tf)
+    tf.close()
+    if DBXTOKEN:
+       backup(AUTOCHATFILE)
+    os.remove(AUTOCHATFILE)  
+
+def loadautochats():
+    if DBXTOKEN:
+       restore(AUTOCHATFILE)
+    if os.path.isfile(AUTOCHATFILE):
+       tf = open(AUTOCHATFILE,'r')
+       global autochatsdb
+       autochatsdb=json.load(tf)
+       tf.close()
+       os.remove(AUTOCHATFILE)
+    else:
+       print("File "+AUTOCHATFILE+" not exists!!!")
+
+def backup_db(bot):
+    bot.account.stop_io()
+    print('Backup...')
+    zipfile = zipdir(bot_home+'/.simplebot/', encode_bot_addr+'.zip')
+    bot.account.start_io()
+    if os.path.getsize('./'+zipfile)>22:
+       backup('./'+zipfile)
+    else:
+       print('Invalid zip file!')
+    os.remove('./'+zipfile)
+
 #end secure save storage
+
+def fixautochatsdb(bot):
+    cids = []
+    dchats = bot.account.get_chats()
+    for c in dchats:
+        cids.append(c.id)
+    tmpdict = copy.deepcopy(autochatsdb)
+    for (key, value) in tmpdict.items():
+        for (inkey, invalue) in value.items():
+            if inkey not in cids:
+               print('El chat '+str(inkey)+' no existe en el bot')
+               del autochatsdb[key][inkey]
+
 
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
@@ -256,7 +308,11 @@ def deltabot_start(bot: DeltaBot) -> None:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
     global LOGINFILE
     LOGINFILE = './'+encode_bot_addr+'/logindb.json'
+    global AUTOCHATFILE
+    AUTOCHATFILE = './'+encode_bot_addr+'/autochatsdb.json'
     loadlogin()
+    loadautochats()
+    fixautochatsdb(bot)
     #if os.path.isfile(encode_bot_addr+'.zip'):
        #unzipfile(encode_bot_addr+'.zip', '/')
 
@@ -319,7 +375,8 @@ async def convertsticker(infilepath,outfilepath):
        print_dep_message(exporters)
 
     an = importer.process(infilepath)
-    exporter.process(an, outfilepath, lossless=False, method=0, quality=5, skip_frames=30, dpi=5)
+    an.scale(128,128)
+    exporter.process(an, outfilepath, lossless=False, method=3, quality=50, skip_frames=8)
 
 async def chat_news(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
@@ -552,6 +609,9 @@ async def add_auto_chats(bot, replies, message):
 def async_add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     loop.run_until_complete(add_auto_chats(bot, replies, message))
+    saveautochats()
+    if DBXTOKEN:
+       backup_db(bot)
 
 async def save_delta_chats(replies, message):
     """This is for save the chats deltachat/telegram in Telegram Saved message user"""
