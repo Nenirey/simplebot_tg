@@ -30,7 +30,12 @@
     "API_HASH": {
       "description": "Get this value from https://my.telegram.org",
       "value": ""
-    }   
+    },
+    "DBXTOKEN": {
+      "description": "Get this value from https://www.dropbox.com/developers/apps/create",
+      "required": false,
+      "value": ""
+    } 
   },
   "addons": [
   ],
