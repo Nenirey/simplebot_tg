@@ -33,7 +33,7 @@
     },
     "DBXTOKEN": {
       "description": "Get this value from https://www.dropbox.com/developers/apps/create",
-      "value": ""
+      "value": "",
       "required": false
     }    
   },
