@@ -1145,7 +1145,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
                        n_option = 0
                        for ans in m.poll.poll.answers:
-                           poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_0_'+str(n_option)
+                           poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_'+str(n_option)+'_0'
                            n_option+=1
 
               #check if message have document
