@@ -50,7 +50,7 @@ white_list = None
 black_list = None
 
 MAX_AUTO_CHATS = 5
-MAX_SIZE_DOWN = 10485760
+MAX_SIZE_DOWN = 20485760
 MIN_SIZE_DOWN = 655360
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
@@ -1045,6 +1045,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               msg_id = ''
               tipo = None
               text_message = ''
+              poll_message = ''
               if show_id:
                  msg_id = '\n'+str(m.id)
 
@@ -1130,6 +1131,16 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                      html_buttons += '\n'
                      nrow += 1
               down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_aiouploaderbot"
+            
+              #check if message is a poll
+              if m.poll:
+                 if hasattr(m.poll.poll, 'question') and m.poll.poll.question:
+                    poll_message+=m.poll.poll.question+'\n\n'
+                 if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
+                    n_option = 0
+                    for ans in m.poll.poll.answers:
+                        poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_0_'+str(n_option)
+                        n_option+=1
 
               #check if message have document
               if hasattr(m,'document') and m.document:
@@ -1208,7 +1219,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                 #print('Archivo web muy grande!')
                                 down_button = '\n[ARCHIVO WEB] '+sizeof_fmt(f_size)+down_button
                                 file_attach = ''
-
+                  
                        if hasattr(m.media.webpage,'title') and m.media.webpage.title:
                           wtitle = m.media.webpage.title
                        else:
@@ -1231,7 +1242,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
 
               #send only text message
               if no_media:
-                 myreplies.add(text = mservice+mquote+send_by+str(text_message)+html_buttons+msg_id, chat = chat_id, quote = quote)
+                 myreplies.add(text = mservice+mquote+send_by+str(text_message)+poll_message+html_buttons+msg_id, chat = chat_id, quote = quote)
 
               #mark message as read
               m_id = m.id
