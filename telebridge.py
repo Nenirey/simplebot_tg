@@ -1153,13 +1153,20 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if m.poll.results.results and total_results>0:
                        n_results = 0
                        for res in m.poll.results.results:
-                           poll_message+='\n'+("☑ " if res.chosen else "")+str(round((res.voters/total_results)*100))+'% ('+str(res.voters)+') '+m.poll.poll.answers[n_results].text
+                           if res.chosen:
+                              if res.correct:
+                                 mark_text = "✅ "
+                              else:   
+                                 mark_text = "☑ "
+                           else:
+                              mark_text = "⬛ "
+                           poll_message+='\n'+mark_text+str(round((res.voters/total_results)*100))+'% ('+str(res.voters)+') '+m.poll.poll.answers[n_results].text
                            n_results+=1
                     else:
                        if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
                           n_option = 0
                           for ans in m.poll.poll.answers:
-                              poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_'+str(n_option)
+                              poll_message+='\n⬛ '+ans.text+' /c_'+str(m.id)+'_'+str(n_option)
                               n_option+=1
                     poll_message+='\n\n'+str(total_results)+' votos'          
 
