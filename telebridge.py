@@ -930,6 +930,9 @@ async def click_button(message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión usar los botones!')
        return
+    if len(parametros)<2:
+       replies.add(text = 'Faltan parametros, debe proporcionar el id de mensaje y al menos el numero de columna')  
+       return  
     dchat = message.chat.get_name()
 
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
@@ -949,8 +952,13 @@ async def click_button(message, replies, payload):
           target = id_chat
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
        all_messages = await client.get_messages(target, ids = [int(parametros[0])])
+       n_column = int(parametros[1])
+       if len(paramtros)<3:
+          n_row = 0
+       else:
+          n_row = int(parametros[2])
        for m in all_messages:
-           await m.click(int(parametros[1]),int(parametros[2]))
+           await m.click(n_column, n_row)
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -1046,6 +1054,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               tipo = None
               text_message = ''
               poll_message = ''
+              fwd_text = '' 
               if show_id:
                  msg_id = '\n'+str(m.id)
 
@@ -1054,6 +1063,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  text_message = str(m.text)
               else:
                  text_message = ''
+                  
+              #check if message is a forward
+              if m.fwd_from:
+                 fwd_text = 'Mensaje reenviado\n' 
 
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
@@ -1092,7 +1105,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
 
               #check if message is a system message
               if hasattr(m,'action') and m.action:
-                 mservice = '_system message_\n'
+                 mservice = '⚙\n'
                  if isinstance(m.action, types.MessageActionPinMessage):
                     mservice += '_Ancló el mensaje_\n'
                  elif isinstance(m.action, types.MessageActionChatAddUser):
@@ -1130,23 +1143,25 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_aiouploaderbot"
+              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_aiouploaderbot"
             
               #check if message is a poll
               if m.poll:
                  if hasattr(m.poll.poll, 'question') and m.poll.poll.question:
-                    poll_message+=m.poll.poll.question+'\n\n'
-                 if m.poll.results.results:
-                    n_results = 0
-                    for res in m.poll.results.results:
-                        poll_message+='\n'+str(res.voters)+' '+m.poll.poll.answers[n_results].text
-                        n_results+=1
-                 else:
-                    if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
-                       n_option = 0
-                       for ans in m.poll.poll.answers:
-                           poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_'+str(n_option)+'_0'
-                           n_option+=1
+                    poll_message+='\n📊 '+m.poll.poll.question+'\n\n'
+                    total_results = m.poll.results.total_voters
+                    if m.poll.results.results and total_results>0:
+                       n_results = 0
+                       for res in m.poll.results.results:
+                           poll_message+='\n'+("☑ " if res.chosen else "")+str(round((res.voters/total_results)*100))+'% ('+str(res.voters)+') '+m.poll.poll.answers[n_results].text
+                           n_results+=1
+                    else:
+                       if hasattr(m.poll.poll,'answers') and m.poll.poll.answers:
+                          n_option = 0
+                          for ans in m.poll.poll.answers:
+                              poll_message+='\n'+ans.text+' /c_'+str(m.id)+'_'+str(n_option)
+                              n_option+=1
+                    poll_message+='\n\n'+str(total_results)+' votos'          
 
               #check if message have document
               if hasattr(m,'document') and m.document:
@@ -1165,7 +1180,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
-                    myreplies.add(text = mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote)
+                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -1174,7 +1189,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
+                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
                  no_media = False
 
               #check if message have media
@@ -1190,10 +1205,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...')
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
+                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
+                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
                     no_media = False
 
                  #check if message have media webpage
@@ -1240,15 +1255,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
 
                        if file_attach!= '':
-                          myreplies.add(text = mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
                        else:
-                          myreplies.add(text = mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id, quote = quote)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id, quote = quote)
                     else:
                        no_media = True
 
               #send only text message
               if no_media:
-                 myreplies.add(text = mservice+mquote+send_by+str(text_message)+poll_message+html_buttons+msg_id, chat = chat_id, quote = quote)
+                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+html_buttons+msg_id, chat = chat_id, quote = quote)
 
               #mark message as read
               m_id = m.id
