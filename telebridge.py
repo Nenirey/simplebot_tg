@@ -953,7 +953,7 @@ async def click_button(message, replies, payload):
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
        all_messages = await client.get_messages(target, ids = [int(parametros[0])])
        n_column = int(parametros[1])
-       if len(paramtros)<3:
+       if len(parametros)<3:
           n_row = 0
        else:
           n_row = int(parametros[2])
