@@ -312,6 +312,8 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/forward" ,func = async_forward_message)
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
     bot.commands.register(name = "/news" ,func = async_chat_news)
+    bot.commands.register(name = "/info" ,func = async_chat_info)
+
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -337,6 +339,12 @@ def deltabot_start(bot: DeltaBot) -> None:
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
+def broadcast_message(bot, msg):
+    for (user,_) in logindb.items():
+        try:
+           bot.get_chat(user).send_text(msg)
+        except:
+           print('Error sending broadcast to '+user)
 
 def register_msg(contacto, dc_id, dc_msg, tg_msg):
    global messagedb
@@ -465,6 +473,50 @@ def async_chat_news(bot, payload, replies, message):
     """See a list of all your chats status/unread from telegram. Example: /news"""
     loop.run_until_complete(chat_news(bot, payload, replies, message))
 
+async def chat_info(bot, payload, replies, message):
+    dchat = message.chat.get_name()
+    tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
+    if len(tg_ids)>0:
+       if tg_ids[-1].lstrip('-').isnumeric():
+          f_id = int(tg_ids[-1])
+       else:
+          f_id = tg_ids[-1]
+    else:
+       replies.add(text = 'Este no es un chat de telegram!')
+       return
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para ver información del chat!')
+       return
+    if message.get_sender_contact().addr not in chatdb:
+       chatdb[message.get_sender_contact().addr] = {}
+    try:
+       if not os.path.exists(message.get_sender_contact().addr):
+          os.mkdir(message.get_sender_contact().addr)
+       if message.quote:
+          t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+          if t_reply:
+             replies.add(text='Telegram message id: '+str(t_reply), quote=message)
+          else:
+             replies.add(text='No se encontró la referencia de este mensaje con el de Telegram', quote=message)
+       else:
+          replies.add(text='Debe responder a un mensaje para mostrar información de este', quote=message)
+          #TODO show chat information
+          #client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+          #await client.connect()
+          #me = await client.get_me()
+          #my_id = me.id
+          #all_chats = await client.get_dialogs(ignore_migrated = True)
+          #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
+          #await client.disconnect()
+          #replies.add(text=chat_list)
+    except:
+       code = str(sys.exc_info())
+       replies.add(text=code)
+
+def async_chat_info(bot, payload, replies, message):
+    """Show message information from telegram. Example: reply a message with /info"""
+    loop.run_until_complete(chat_info(bot, payload, replies, message))
+
 async def pin_messages(message, replies):
     dchat = message.chat.get_name()
     tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
@@ -482,7 +534,7 @@ async def pin_messages(message, replies):
        t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
        if t_reply:
           await client.pin_message(f_id, t_reply)
-          replies.add(text = 'Mensaje fijado')
+          replies.add(text = 'Mensaje fijado!')
        else:
           replies.add(text = 'No se puede fijar el mensaje porque no esta asociado a un mensaje de Telegram!')
        await client.disconnect()
@@ -559,7 +611,7 @@ def list_chats(replies, message, payload):
        chatdb[message.get_sender_contact().addr] = {}
     chat_list = ''
     for (key, value) in chatdb[message.get_sender_contact().addr].items():
-        chat_list+='\n\n'+value+'\nDesvincular: /remove_'+key
+        chat_list+='\n\n'+value+'\n❌ Desvincular: /remove_'+key
     replies.add(text = chat_list)
 
 async def add_auto_chats(bot, replies, message):
@@ -679,7 +731,9 @@ async def load_delta_chats(contacto, replies = None):
           os.remove(contacto+'.json')
        await client.disconnect()
     except:
-       print('Error loading delta chats')
+       code = str(sys.exc_info())
+       print('Error loading delta chats of '+contacto+'\n'+code)
+
 
 def async_load_delta_chats(message, replies):
     loop.run_until_complete(load_delta_chats(contacto=message.get_sender_contact().addr, replies=replies))
@@ -1115,6 +1169,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                              reply_send_by = str((first_name + ' ' + last_name).strip())+": "
                           else:
                              reply_send_by = ""
+                          if mensaje[0].poll:
+                             if hasattr(mensaje[0].poll.poll, 'question') and mensaje[0].poll.poll.question:
+                                reply_text+='📊 '+mensaje[0].poll.poll.question
                           if hasattr(mensaje[0],'media') and mensaje[0].media:
                              if hasattr(mensaje[0].media,'photo'):
                                 reply_text += '[FOTO]'
@@ -1129,7 +1186,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'action') and m.action:
                  mservice = '⚙\n'
                  if isinstance(m.action, types.MessageActionPinMessage):
-                    mservice += '_Ancló el mensaje_\n'
+                    mservice += '_📌Fijó el mensaje_\n'
                  elif isinstance(m.action, types.MessageActionChatAddUser):
                     mservice += '_Se unió al grupo_\n'
                  elif isinstance(m.action, types.MessageActionChatJoinedByLink):
@@ -1138,6 +1195,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     mservice += '_Salió del grupo_\n'
                  elif isinstance(m.action, types.MessageActionChannelCreate):
                     mservice += '_Se creo el grupo/canal_\n'
+                 elif isinstance(m.action, types.MessageActionPhoneCall):
+                    mservice += '_📞Llamada_\n'
 
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
@@ -1309,13 +1368,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               await m.mark_read()
            else:
               if not load_history and not is_auto:
-                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n/more", chat = chat_id)
+                 myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
               break
        if sin_leer-limite<=0 and not load_history and not is_auto:
-          myreplies.add(text = "Estas al día con "+str(ttitle)+"\n/more", chat = chat_id)
+          myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
        if load_history:
-          myreplies.add(text = "Cargar más mensajes:\n/more_-"+str(m_id), chat = chat_id)
+          myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
        await client.disconnect()
     except:
@@ -1439,13 +1498,16 @@ async def send_cmd(message, replies, payload):
           target = int(id_chat)
        else:
           target = id_chat
+       t_reply = None
+       if message.quote:
+          t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
        if message.filename:
           if message.filename.find('.aac')>0:
-             await client.send_file(target, message.filename, caption = payload, voice_note=True)
+             await client.send_file(target, message.filename, caption = payload, voice_note=True, reply_to=t_reply)
           else:
-             await client.send_file(target, message.filename, caption = payload)
+             await client.send_file(target, message.filename, caption = payload, reply_to=t_reply)
        else:
-          await client.send_message(target,payload)
+          await client.send_message(target,payload, reply_to=t_reply)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, payload))
