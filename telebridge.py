@@ -1534,11 +1534,12 @@ async def send_cmd(message, replies, payload):
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
        if message.filename:
           if message.filename.find('.aac')>0:
-             await client.send_file(target, message.filename, caption = payload, voice_note=True, reply_to=t_reply)
+             m = await client.send_file(target, message.filename, caption = payload, voice_note=True, reply_to=t_reply)
           else:
-             await client.send_file(target, message.filename, caption = payload, reply_to=t_reply)
+             m = await client.send_file(target, message.filename, caption = payload, reply_to=t_reply)
        else:
-          await client.send_message(target,payload, reply_to=t_reply)
+          m = await client.send_message(target,payload, reply_to=t_reply)
+       register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, payload))
