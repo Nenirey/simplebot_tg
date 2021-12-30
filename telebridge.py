@@ -532,10 +532,10 @@ async def chat_info(bot, payload, replies, message):
                          full = await client(GetFullUserRequest(mensaje[0].from_id))
                          tinfo += "Por usuario:"
                       elif isinstance(mensaje[0].from_id, types.PeerChannel):
-                         full = await client(GetFullChannelRequest(mensaje[0].from_id))
+                         full = await client(functions.channels.GetFullChannelRequest(channel = mensaje[0].from_id))
                          tinfo += "Por grupo/canal:"
                       elif isinstance(mensaje[0].from_id, types.PeerChat):
-                         full = await client(GetFullChatRequest(mensaje[0].from_id))
+                         full = await client(functions.messages.GetFullChatRequest(chat_id = mensaje[0].from_id))
                          tinfo += "Por chat:"
                       if full.user.username:
                          tinfo += "\n@👤: @"+str(full.user.username)
@@ -563,7 +563,7 @@ async def chat_info(bot, payload, replies, message):
              if hasattr(full_pchat,'chats') and full_pchat.chats and len(full_pchat.chats)>0:
                 tinfo += "\nTitulo: "+full_pchat.chats[0].title
                 if hasattr(full_pchat.chats[0],'participants_count') and full_pchat.chats[0].participants_count:
-                   tinfo += "\nParticipantes: "+str(full_pchat.chats[0].participants_count)
+                   tinfo += "\nParticipantes: "+str(full_pchat.chats[0].participants_count)             
           elif isinstance(pchat, types.InputPeerUser):
                full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
                if hasattr(full_pchat,'user') and full_pchat.user:
@@ -720,23 +720,23 @@ async def add_auto_chats(bot, replies, message):
           #{contact_addr:{chat_id:chat_type}}
           if message.get_sender_contact().addr not in autochatsdb:
              autochatsdb[message.get_sender_contact().addr]={}
-          if message.chat.id in autochatsdb[message.get_sender_contact().addr]:
-             del autochatsdb[message.get_sender_contact().addr][message.chat.id]
+          if str(message.chat.id) in autochatsdb[message.get_sender_contact().addr]:
+             del autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]
              replies.add(text='Se ha desactivado la automatizacion en este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
           else:
              if len(autochatsdb[message.get_sender_contact().addr])>=MAX_AUTO_CHATS and not bot.is_admin(message.get_sender_contact()):
-                autochatsdb[message.get_sender_contact().addr][message.chat.id]=target
+                autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
                 for (key,_) in autochatsdb[message.get_sender_contact().addr].items():
-                    del autochatsdb[message.get_sender_contact().addr][key]
+                    del autochatsdb[message.get_sender_contact().addr][str(key)]
                     replies.add(text='Solo se permiten automatizar hasta 5 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
                     break
              else:
-                autochatsdb[message.get_sender_contact().addr][message.chat.id]=target
+                autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
                 replies.add(text='Se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
        else:
           replies.add(text='Solo se permite automatizar chats privados, canales y algunos grupos permitidos por ahora')
     else:
-       replies.add('Este no es un chat de Telegram!')
+       replies.add(text='Este no es un chat de Telegram!')
 
 
 def async_add_auto_chats(bot, replies, message):
@@ -808,12 +808,11 @@ def remove_chat(payload, replies, message):
     if message.get_sender_contact().addr not in chatdb:
        replies.add(text = 'No tiene ningun chat vinculado!')
        return
-    target = ''
     if not payload or payload =='':
-       dchat = message.chat.get_name()
-       tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
-       if len(tg_ids)>0:
-          target = tg_ids[-1]
+       target = get_tg_id(message.chat)
+       if not target:
+          replies.add(text = 'Este no es un chat de Telegram!')
+          return
     else:
        target = payload.replace(' ','_')
     if target == 'all':
@@ -832,7 +831,7 @@ def remove_chat(payload, replies, message):
           if message.get_sender_contact().addr in autochatsdb:
              for (key, value) in autochatsdb[message.get_sender_contact().addr].items():
                  if str(value) == target:
-                    del autochatsdb[message.get_sender_contact().addr][key]
+                    del autochatsdb[message.get_sender_contact().addr][str(key)]
                     replies.add(text = 'Se desactivaron las actualizaciones para el chat '+str(key))
        except:
           print('Dictionary change size...')
@@ -1576,16 +1575,7 @@ async def inline_cmd(bot, message, replies, payload):
     else:
        replies.add(text = 'Debe proporcionar el nombre del bot y el termino de búsqueda, ejemplo: /inline gif gaticos\nAqui hay otros ejemplos probados:\n'+example_inline)
        return
-    if contacto in chatdb and str(message.chat.get_name()) in chatdb[contacto].values():
-       for (key, value) in chatdb[contacto].items():
-           if value == str(message.chat.get_name()):
-              if key.lstrip('-').isnumeric():
-                 target = int(key)
-              else:
-                 target = key
-              break
-    else:
-       target = None
+    target = get_tg_id(message.chat)
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
        await client.connect()
@@ -1618,58 +1608,61 @@ async def inline_cmd(bot, message, replies, payload):
                     for e in r.message.entities:
                         if hasattr(e,'url') and e.url:
                            resultado+=str(e.url)+'\n'
-              try:
-                 if hasattr(r,'document') and r.document:
-                    attach = await client.download_media(r.document, contacto)
-              except:
-                 print('Error descargando inline document result')
 
               if attach == '':
                  try:
+                    if hasattr(r,'document') and r.document:
+                       attach = await client.download_media(r.document, contacto)
+                       try:
+                          if attach.lower().endswith('.webp'):
+                             tipo = 'sticker'
+                          if attach.lower().endswith('.tgs'):
+                             filename, file_extension = os.path.splitext(attach)
+                             attach_converted = filename+'.webp'
+                             await convertsticker(attach,attach_converted)
+                             attach = attach_converted
+                             tipo = 'sticker'               
+                       except:
+                          print('error convirtiendo sticker')
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       tipo = None
+                 except:
+                    print('Error descargando inline document result')
+                 try:
                     if hasattr(r,'photo') and r.photo:
                        attach = await client.download_media(r.photo, contacto)
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline photo result')
                  try:
                     if hasattr(r,'gif') and r.gif:
                        attach = await client.download_media(r.gif, contacto)
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline gif result')
                  try:
                     if hasattr(r,'video') and r.video:
                        attach = await client.download_media(r.video, contacto)
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline video result')
                  try:
                     if hasattr(r,'mpeg4_gif') and r.mpeg4_gif:
                        attach = await client.download_media(r.mpeg4_gif, contacto)
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline mpeg4_gif result')
                  try:
                     if hasattr(r,'audio') and r.audio:
                        attach = await client.download_media(r.audio, contacto)
+                       replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline audio result')
-              try:
-                 if attach.lower().endswith('.webp'):
-                    tipo = 'sticker'
-                 if attach.lower().endswith('.tgs'):
-                    filename, file_extension = os.path.splitext(attach)
-                    attach_converted = filename+'.webp'
-                    await convertsticker(attach,attach_converted)
-                    attach = attach_converted
-                    tipo = 'sticker'
-              except:
-                 print('error convirtiendo sticker')
-
-              replies.add(text = resultado, filename=attach, viewtype=tipo)
-              resultado+='\n\n'
               limite +=1
            else:
               break
        await client.disconnect()
     except:
-       #await client(SendMessageRequest(target, payload))
        code = str(sys.exc_info())
        if bot.is_admin(contacto):
          replies.add(text=code)
@@ -1876,7 +1869,7 @@ async def auto_load(bot, message, replies):
                    time.sleep(0.100)
         except:
            print('Error in autochatsdb dict')
-        time.sleep(10)
+        time.sleep(15)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
