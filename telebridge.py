@@ -531,27 +531,30 @@ async def chat_info(bot, payload, replies, message):
                       if isinstance(mensaje[0].from_id, types.PeerUser):
                          full = await client(GetFullUserRequest(mensaje[0].from_id))
                          tinfo += "Por usuario:"
+                         if full.user.username:
+                            tinfo += "\n@👤: @"+str(full.user.username)
+                         if full.user.first_name:
+                            tinfo += "\nNombre: "+str(full.user.first_name)
+                         if full.user.last_name:
+                            tinfo += "\nApellidos: "+str(full.user.last_name)
+                         tinfo += "\n🆔️: "+str(mensaje[0].from_id.user_id)
+                         img = await client.download_profile_photo(mensaje[0].from_id.user_id)
                       elif isinstance(mensaje[0].from_id, types.PeerChannel):
                          full = await client(functions.channels.GetFullChannelRequest(channel = mensaje[0].from_id))
                          tinfo += "Por grupo/canal:"
+                         if hasattr(full,'post_author') and full.post_author:
+                            tinfo += "\nAutor: "+full.post_author
+                         img = await client.download_profile_photo(mensaje[0].from_id.channel_id)
                       elif isinstance(mensaje[0].from_id, types.PeerChat):
                          full = await client(functions.messages.GetFullChatRequest(chat_id = mensaje[0].from_id))
-                         tinfo += "Por chat:"
-                      if full.user.username:
-                         tinfo += "\n@👤: @"+str(full.user.username)
-                      if full.user.first_name:
-                         tinfo += "\nNombre: "+str(full.user.first_name)
-                      if full.user.last_name:
-                         tinfo += "\nApellidos: "+str(full.user.last_name)
-                      tinfo += "\n🆔️: "+str(mensaje[0].from_id.user_id)
-                      if full.about:
+                         tinfo += "Por chat:"                               
+                      if hasattr(full,'about') and full.about:
                          tinfo += "\nBiografia: "+str(full.about)
-                      img = await client.download_profile_photo(mensaje[0].from_id.user_id)
                    tinfo += "\n\nMensaje:"                     
                    tinfo += "\nTelegram mensaje id: "+str(t_reply)
                    tinfo += "\nDeltaChat mensaje id: "+str(message.quote.id)
                    tinfo += "\nFecha de envio (UTC): "+str(mensaje[0].date)
-                   replies.add(text=tinfo, html=str(mensaje[0]), filename=img, quote=message)
+                   replies.add(text=tinfo, html=mensaje[0].stringify(), filename=img, quote=message)
                 else:
                    replies.add(text="El mensaje fue eliminado?")
              await client.disconnect()
