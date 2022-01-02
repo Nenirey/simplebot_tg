@@ -354,6 +354,11 @@ def deltabot_start(bot: DeltaBot) -> None:
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
+def hide_spoiler(s_text,offset,tlen):
+    h_text = '▚'*tlen
+    mystring = h_text.join([s_text[:offset],s_text[offset+tlen:]])
+    return mystring
+
 def broadcast_message(bot, msg):
     for (user,_) in logindb.items():
         try:
@@ -567,7 +572,7 @@ async def chat_info(bot, payload, replies, message):
                 tinfo += "\nTitulo: "+full_pchat.chats[0].title
                 if hasattr(full_pchat.chats[0],'participants_count') and full_pchat.chats[0].participants_count:
                    tinfo += "\nParticipantes: "+str(full_pchat.chats[0].participants_count)             
-          elif isinstance(pchat, types.InputPeerUser):
+          elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
                full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
                if hasattr(full_pchat,'user') and full_pchat.user:
                   tinfo += "\nNombre: "+full_pchat.user.first_name
@@ -581,7 +586,7 @@ async def chat_info(bot, payload, replies, message):
                if hasattr(full_pchat,'chats') and full_pchat.chats and len(full_pchat.chats)>0:
                   tinfo = full_pchat.chats[0].title
                if hasattr(full_pchat,'user') and full_pchat.user:
-                   tinfo = full_pchat.user.first_name
+                   tinfo = full_pchat.user.first_name                
           try:
              img = await client.download_profile_photo(f_id, message.get_sender_contact().addr)
           except:
@@ -785,13 +790,16 @@ async def load_delta_chats(contacto, replies = None):
        await client.connect()
        await client.get_dialogs()
        my_id = await client(functions.users.GetFullUserRequest('me'))
-       my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)
-       await client.download_media(my_pin)
-       if os.path.isfile(contacto+'.json'):
-          tf = open(contacto+'.json','r')
-          chatdb[contacto]=json.load(tf)
-          tf.close()
-          os.remove(contacto+'.json')
+       if hasattr(my_id,'pinned_msg_id') and my_id.pinned_msg_id:
+          my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)
+          await client.download_media(my_pin)
+          if os.path.isfile(contacto+'.json'):
+             tf = open(contacto+'.json','r')
+             chatdb[contacto]=json.load(tf)
+             tf.close()
+             os.remove(contacto+'.json')
+       else:
+          print('No pinned message!')
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -1178,6 +1186,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               text_message = ''
               poll_message = ''
               fwd_text = ''
+              html_spoiler = None
               if show_id:
                  msg_id = '\n'+str(m.id)
 
@@ -1186,6 +1195,16 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  text_message = str(m.text)
               else:
                  text_message = ''
+
+              #check if message has spoiler text
+              if hasattr(m, 'entities') and m.entities:
+                 for ent in m.entities:
+                     ent_type_str = str(ent)
+                     if ent_type_str.find('MessageEntitySpoiler')>=0:
+                        html_spoiler = '<span style="display:block" class="note">'+text_message+'</span>'
+                        text_message = hide_spoiler(m.message, ent.offset, ent.length)
+                        break
+                            
 
               #check if message is a forward
               if m.fwd_from:
@@ -1315,7 +1334,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
-                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote)
+                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -1324,7 +1343,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
+                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler)
                  no_media = False
 
               #check if message have media
@@ -1340,10 +1359,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...')
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
+                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote)
+                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler)
                     no_media = False
 
                  #check if message have media webpage
@@ -1390,15 +1409,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
 
                        if file_attach!= '':
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler)
                        else:
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id, quote = quote)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler)
                     else:
                        no_media = True
 
               #send only text message
               if no_media:
-                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+html_buttons+msg_id, chat = chat_id, quote = quote)
+                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler)
 
               #mark message as read
               m_id = m.id
