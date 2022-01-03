@@ -538,12 +538,12 @@ async def chat_info(bot, payload, replies, message):
                       if isinstance(mensaje[0].from_id, types.PeerUser):
                          full = await client(GetFullUserRequest(mensaje[0].from_id))
                          tinfo += "Por usuario:"
-                         if full.user.username:
-                            tinfo += "\n@👤: @"+str(full.user.username)
-                         if full.user.first_name:
-                            tinfo += "\nNombre: "+str(full.user.first_name)
-                         if full.user.last_name:
-                            tinfo += "\nApellidos: "+str(full.user.last_name)
+                         if full.users[0].username:
+                            tinfo += "\n@👤: @"+str(full.users[0].username)
+                         if full.users[0].first_name:
+                            tinfo += "\nNombre: "+str(full.users[0].first_name)
+                         if full.users[0].last_name:
+                            tinfo += "\nApellidos: "+str(full.users[0].last_name)
                          tinfo += "\n🆔️: "+str(mensaje[0].from_id.user_id)
                          img = await client.download_profile_photo(mensaje[0].from_id.user_id)
                       elif isinstance(mensaje[0].from_id, types.PeerChannel):
@@ -576,12 +576,12 @@ async def chat_info(bot, payload, replies, message):
                    tinfo += "\nParticipantes: "+str(full_pchat.chats[0].participants_count)             
           elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
                full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
-               if hasattr(full_pchat,'user') and full_pchat.user:
-                  tinfo += "\nNombre: "+full_pchat.user.first_name
-                  if full_pchat.user.last_name:
-                     tinfo += "\nApellidos: "+full_pchat.user.last_name
-                  if hasattr(full_pchat.user,"username") and full_pchat.user.username:
-                     tinfo+="\n@: "+full_pchat.user.username
+               if hasattr(full_pchat,'users') and full_pchat.users:
+                  tinfo += "\nNombre: "+full_pchat.users[0].first_name
+                  if full_pchat.users[0].last_name:
+                     tinfo += "\nApellidos: "+full_pchat.users[0].last_name
+                  if hasattr(full_pchat.users[0],"username") and full_pchat.users[0].username:
+                     tinfo+="\n@: "+full_pchat.users[0].username
           elif isinstance(pchat, types.InputPeerChat):
                print('Hemos encontrado un InputPeerChat: '+str(f_id))
                full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
