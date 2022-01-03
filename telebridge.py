@@ -50,6 +50,8 @@ bot_home = expanduser("~")
 white_list = None
 black_list = None
 
+MAX_MSG_LOAD = 5
+MAX_MSG_LOAD_AUTO = 5
 MAX_AUTO_CHATS = 10
 MAX_SIZE_DOWN = 20485760
 MIN_SIZE_DOWN = 655360
@@ -790,8 +792,8 @@ async def load_delta_chats(contacto, replies = None):
        await client.connect()
        await client.get_dialogs()
        my_id = await client(functions.users.GetFullUserRequest('me'))
-       if hasattr(my_id,'pinned_msg_id') and my_id.pinned_msg_id:
-          my_pin = await client.get_messages('me', ids=my_id.pinned_msg_id)
+       if hasattr(my_id.full_user,'pinned_msg_id') and my_id.full_user.pinned_msg_id:
+          my_pin = await client.get_messages('me', ids=my_id.full_user.pinned_msg_id)
           await client.download_media(my_pin)
           if os.path.isfile(contacto+'.json'):
              tf = open(contacto+'.json','r')
@@ -1112,10 +1114,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     chat_id = bot.get_chat(int(dc_id))
     dchat = chat_id.get_name()
     if is_auto:
-       max_limit = 5
+       max_limit = MAX_MSG_LOAD_AUTO
        is_down = False
     else:
-       max_limit = 5
+       max_limit = MAX_MSG_LOAD
        is_down = message.text.lower().startswith('/down')
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id)
@@ -1243,7 +1245,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                 reply_text += '[FOTO]'
                           if hasattr(mensaje[0],'document') and mensaje[0].document:
                              reply_text += '[ARCHIVO]'
-                          reply_text += str(mensaje[0].text)
+                          reply_msg = mensaje[0].message
+                          if hasattr(mensaje[0], 'entities') and mensaje[0].entities:
+                             for ent in mensaje[0].entities:
+                                 ent_type_str = str(ent)
+                                 if ent_type_str.find('MessageEntitySpoiler')>=0:                                
+                                    reply_msg = hide_spoiler(reply_msg, ent.offset, ent.length)
+                                    break
+                          reply_text += reply_msg
                           if len(reply_text)>60:
                              reply_text = reply_text[0:60]+'...'
                           mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
