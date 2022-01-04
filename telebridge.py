@@ -55,7 +55,7 @@ MAX_MSG_LOAD_AUTO = 5
 MAX_AUTO_CHATS = 10
 MAX_SIZE_DOWN = 20485760
 MIN_SIZE_DOWN = 655360
-CAN_IMP = True
+CAN_IMP = False
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
@@ -1347,14 +1347,16 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     file_attach = await client.download_media(m.document, contacto)
                     #Try to convert all tgs sticker to png
                     try:
-                       if file_attach.lower().endswith('.webp'):
-                          tipo = "sticker"
-                       if file_attach.lower().endswith('.tgs'):
-                          filename, file_extension = os.path.splitext(file_attach)
-                          attach_converted = filename+'.webp'
-                          await convertsticker(file_attach,attach_converted)
-                          file_attach = attach_converted
-                          tipo = "sticker"
+                       if file_attach.lower().endswith('.webp') or file_attach.lower().endswith('.tgs'):
+                          tipo = "sticker"                          
+                          if CAN_IMP:
+                             send_by = sender_name+":"
+                       #if file_attach.lower().endswith('.tgs'):
+                          #filename, file_extension = os.path.splitext(file_attach)
+                          #attach_converted = filename+'.webp'
+                          #await convertsticker(file_attach,attach_converted)
+                          #file_attach = attach_converted
+                          #tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
                     myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
@@ -1660,14 +1662,14 @@ async def inline_cmd(bot, message, replies, payload):
                     if hasattr(r,'document') and r.document:
                        attach = await client.download_media(r.document, contacto)
                        try:
-                          if attach.lower().endswith('.webp'):
+                          if attach.lower().endswith('.webp') or attach.lower().endswith('.tgs'):
                              tipo = 'sticker'
-                          if attach.lower().endswith('.tgs'):
-                             filename, file_extension = os.path.splitext(attach)
-                             attach_converted = filename+'.webp'
-                             await convertsticker(attach,attach_converted)
-                             attach = attach_converted
-                             tipo = 'sticker'               
+                          #if attach.lower().endswith('.tgs'):
+                             #filename, file_extension = os.path.splitext(attach)
+                             #attach_converted = filename+'.webp'
+                             #await convertsticker(attach,attach_converted)
+                             #attach = attach_converted
+                             #tipo = 'sticker'               
                        except:
                           print('error convirtiendo sticker')
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
