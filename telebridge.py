@@ -838,7 +838,7 @@ def remove_chat(payload, replies, message):
        if target in chatdb[message.get_sender_contact().addr]:
           c_title = chatdb[message.get_sender_contact().addr][target]
           del chatdb[message.get_sender_contact().addr][target]
-          replies.add(text = 'Se desvinculó el chat delta '+c_title+' con el chat telegram '+target)
+          replies.add(text = 'Se desvinculó el chat delta '+str(c_title)+' con el chat telegram '+str(target))
        else:
           replies.add(text = 'Este chat no está vinculado a telegram')
        try:
@@ -1852,8 +1852,8 @@ async def preview_chats(bot, payload, replies, message):
                     ttitle = full_pchat.chats[0].title
               elif isinstance(pchat, types.InputPeerUser):
                  full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
-                 if hasattr(full_pchat,'user') and full_pchat.user:
-                    ttitle = full_pchat.user.first_name
+                 if hasattr(full_pchat,'users') and full_pchat.users:
+                    ttitle = full_pchat.users[0].first_name
               elif isinstance(pchat, types.InputPeerChat):
                  print('Hemos encontrado un InputPeerChat: '+str(uid))
                  full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
