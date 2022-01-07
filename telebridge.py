@@ -263,9 +263,9 @@ class AccountPlugin:
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
           if ffi_event.name == "DC_EVENT_WARNING":
-             print('Evento warning detectado!', ffi_event)
-             #if ffi_event.data2 and ffi_event.data2.find("Daily send limit")>=0:
-                #print('Limite diario de mensajes alcanzado!')
+             #print('Evento warning detectado!', ffi_event)
+             if ffi_event.data2 and ffi_event.data2.find("Daily user sending quota exceeded")>=0:
+                print('Limite diario de mensajes alcanzado!')
 
 
 
