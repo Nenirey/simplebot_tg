@@ -344,6 +344,7 @@ def deltabot_start(bot: DeltaBot) -> None:
     bridge_init.wait()
     global auto_load_task
     auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
+    global bot_addr
     bot_addr = bot.account.get_config('addr')
     global encode_bot_addr
     encode_bot_addr = urllib.parse.quote(bot_addr, safe='')
@@ -456,6 +457,7 @@ async def chat_news(bot, payload, replies, message):
        my_id = me.id
        all_chats = await client.get_dialogs(ignore_migrated = True)
        chat_list = ''
+       global bot_addr
        for d in all_chats:
            if hasattr(d.entity,'username') and d.entity.username:
               uname = str(d.entity.username)
@@ -463,7 +465,7 @@ async def chat_news(bot, payload, replies, message):
               uname = 'None'
            ttitle = "Unknown"
            last_message = ""
-           send_by = "\n"
+           send_by = ""
            if hasattr(d,'title'):
               ttitle = d.title
            tid = str(d.id)
@@ -472,33 +474,42 @@ async def chat_news(bot, payload, replies, message):
               if my_id == d.id:
                  titulo = 'Mensajes guardados'
               if str(d.id) in chatdb[message.get_sender_contact().addr]:
-                 comando = '\n❌ Desvilcular: /remove_'+str(d.id)
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>'
               else:
-                 comando = '\n✅ Cargar: /load_'+str(d.id)
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>'
 
               if hasattr(d,'message') and d.message:
                  if hasattr(d.message,'from_id') and d.message.from_id:
                     if hasattr(d.message.from_id,'user_id') and d.message.from_id.user_id:
                        try:
                           full_pchat = await client(functions.users.GetFullUserRequest(id = d.message.from_id.user_id))
-                          if hasattr(full_pchat,'user') and full_pchat.user:
-                             send_by = '\n'+full_pchat.user.first_name+': '
+                          if hasattr(full_pchat,'users') and full_pchat.users:
+                             send_by = '<br><b>'+str(full_pchat.users[0].first_name)+'</b>'
                        except:
                           print('Error obteniendo entidad '+str(d.message.from_id.user_id))
-                          pchat = await client.get_entity(d.message.from_id.user_id)
-                          if hasattr(pchat, 'first_name') and pchat.first_name:
-                             send_by = '\n'+str(pchat.first_name)+': '
+                          try:
+                             pchat = await client.get_entity(d.message.from_id.user_id)
+                             if hasattr(pchat, 'first_name') and pchat.first_name:
+                                send_by = '<br><b>'+str(pchat.first_name)+'</b>'
+                          except:
+                             continue
                  if hasattr(d.message,'message') and d.message.message:
-                    last_message += send_by
+                    #last_message += send_by
                     last_message += d.message.message.replace('\n',' ')
-                    if len(last_message)>40:
-                       last_message = last_message[0:40]+'...'
+                    if len(last_message)>50:
+                       last_message = last_message[0:50]+'...'
                     else:
                        last_message = last_message
-              chat_list += '\n\n'+titulo+' ('+str(d.unread_count)+' sin leer)'+last_message+comando
+                 else:
+                    last_message = '[imagen/archivo]'
+              if d.unread_count>0:
+                 no_leidos = str(d.unread_count)
+              else:
+                 no_leidos = ''
+              chat_list += '<br><div style="border-radius:3px;color:white;background:#7777ff"><b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px">'+no_leidos+'</a>'+send_by+'<br>'+last_message+comando+'</div>'
               #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
        await client.disconnect()
-       replies.add(text=chat_list)
+       replies.add(text=str(len(all_chats))+' chats',html=chat_list)
     except:
        code = str(sys.exc_info())
        replies.add(text=code)
@@ -1200,7 +1211,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  text_message = str(m.text)
               else:
                  text_message = ''
-
+                 
               #check if message has spoiler text
               if hasattr(m, 'entities') and m.entities:
                  for ent in m.entities:
@@ -1208,7 +1219,32 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                      if ent_type_str.find('MessageEntitySpoiler')>=0:
                         html_spoiler = text_message
                         text_message = hide_spoiler(m.message, ent.offset, ent.length)
-                        break                           
+                        break 
+              #check if message has comments
+              #if hasattr(m,'replies') and m.replies and hasattr(m.replies,'comments') and m.replies.comments:
+              if hasattr(m,'post') and m.post:
+                 try:
+                    #comentarios = await client(functions.messages.GetRepliesRequest(peer=target, msg_id=m.id, offset_id=m.id, offset_date=datetime(2018, 6, 25), add_offset=0, limit=100, max_id=0, min_id=0, hash=0 ))
+                    comentarios = await client.get_messages(target, reply_to=m.id, limit = 100)
+                 except:
+                    comentarios = None
+                 if comentarios and len(comentarios)>0:
+                    comentarios.reverse()
+                    if html_spoiler:
+                       html_spoiler +=str(len(comentarios)) + " comentarios<hr>"
+                    else:
+                       html_spoiler = str(len(comentarios)) + " comentarios<hr>"
+                    for coment in comentarios:
+                        if isinstance(coment.from_id, types.PeerUser):
+                           full = await client(GetFullUserRequest(coment.from_id))
+                           from_coment = str(full.users[0].first_name)
+                        else:
+                           from_coment = "Unknown"
+                        if coment.message:
+                           file_comment = coment.message
+                        else:
+                           file_comment = "[imagen/archivo]"
+                        html_spoiler += "<br><div style='border-radius:3px;color:white;background:#7777ff'><b>"+from_coment+"</b><br>"+file_comment+"</div>"        
 
               #check if message is a forward
               if m.fwd_from:
@@ -1511,9 +1547,16 @@ async def echo_filter(message, replies):
        await client.get_dialogs()
        mquote = ''
        t_reply = None
+       t_comment = None
        if message.quote:
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
-          if not t_reply:
+          if t_reply:
+             t_message = await client.get_messages(target,ids=[t_reply])
+             if t_message and hasattr(t_message[0],'post') and t_message[0].post:
+                print('escribiendo en Canal...')
+                t_comment = t_reply
+                t_reply = None
+          if not t_reply and not t_comment:
              if message.quote.is_gif():
                 mquote += '[GIF]'
              elif message.quote.is_image():
@@ -1532,25 +1575,25 @@ async def echo_filter(message, replies):
        mtext = mquote+message.text
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
-              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply)
+              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
               register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
-                 m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply)
+                 m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
                  for x in range(1024, len(mtext), 1024):
                      m = await client.send_message(target, mtext[x:x+1024])
                      register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
              else:
-                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply)
+                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
-                 m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply)
+                 m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
-             m = await client.send_message(target,mtext, reply_to = t_reply)
+             m = await client.send_message(target,mtext, reply_to = t_reply, comment_to = t_comment)
              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
