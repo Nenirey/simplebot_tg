@@ -40,8 +40,9 @@ import dropbox
 from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError, AuthError
 import zipfile
+import base64
 
-version = "0.1.7"
+version = "0.1.9"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -55,7 +56,7 @@ MAX_MSG_LOAD_AUTO = 5
 MAX_AUTO_CHATS = 10
 MAX_SIZE_DOWN = 20485760
 MIN_SIZE_DOWN = 655360
-CAN_IMP = True
+CAN_IMP = False
 
 #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
 if os.getenv('WHITE_LIST'):
@@ -319,6 +320,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = async_down_chat_messages)
+    bot.commands.register(name = "/comment" ,func = async_comment_chat_messages)
     bot.commands.register(name = "/c" ,func = async_click_button)
     bot.commands.register(name = "/b" ,func = async_send_cmd)
     bot.commands.register(name = "/search" ,func = async_search_chats)
@@ -457,15 +459,30 @@ async def chat_news(bot, payload, replies, message):
        my_id = me.id
        all_chats = await client.get_dialogs(ignore_migrated = True)
        chat_list = ''
+       chat_count = 0
+       is_full = (payload.lower().find('full')>=0)
+       is_img = (payload.lower().find('img')>=0)
+       is_private = (payload.lower().find('private')>=0)
        global bot_addr
        for d in all_chats:
+           if d.unread_count>0:
+              no_leidos = str(d.unread_count)
+           else:
+              if not is_full:
+                 continue
+              no_leidos = ''
            if hasattr(d.entity,'username') and d.entity.username:
               uname = str(d.entity.username)
            else:
               uname = 'None'
+           if is_private:
+              tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[d.id]))
+              if hasattr(tchat,'chats') and tchat.chats:
+                 continue
            ttitle = "Unknown"
            last_message = ""
            send_by = ""
+           profile_photo = ""
            if hasattr(d,'title'):
               ttitle = d.title
            tid = str(d.id)
@@ -477,7 +494,14 @@ async def chat_news(bot, payload, replies, message):
                  comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>'
               else:
                  comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>'
-
+              try:
+                  profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+titulo[0]+'</center></div>'
+                  if is_img:
+                     profile_photo = '<img src="data:image/jpeg;base64,{}" alt="{}" style="width:50px;height:50px;border-radius:25px"/>'.format(base64.b64encode(await client.download_profile_photo(d.id,bytes,download_big=False)).decode(),titulo)
+                  else:
+                     profile_photo = profile_letter
+              except:
+                  profile_photo = profile_letter
               if hasattr(d,'message') and d.message:
                  if hasattr(d.message,'from_id') and d.message.from_id:
                     if hasattr(d.message.from_id,'user_id') and d.message.from_id.user_id:
@@ -502,20 +526,22 @@ async def chat_news(bot, payload, replies, message):
                        last_message = last_message
                  else:
                     last_message = '[imagen/archivo]'
-              if d.unread_count>0:
-                 no_leidos = str(d.unread_count)
-              else:
-                 no_leidos = ''
-              chat_list += '<br><div style="border-radius:3px;color:white;background:#7777ff"><b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px">'+no_leidos+'</a>'+send_by+'<br>'+last_message+comando+'</div>'
+              chat_count +=1
+              chat_list += '<table><tr><td>'+profile_photo+'</td><td><b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px"> '+no_leidos+' </a>'+send_by+'<br>'+last_message+comando+'</td></tr></table><hr>'
+              #bubbles
+              #chat_list += '<br><div style="border-radius:3px;color:white;background:#7777ff">'+profile_photo+'<b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px">'+no_leidos+'</a>'+send_by+'<br>'+last_message+comando+'</div>'
               #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
        await client.disconnect()
-       replies.add(text=str(len(all_chats))+' chats',html=chat_list)
+       replies.add(text=str(chat_count)+' chats',html=chat_list)
     except:
        code = str(sys.exc_info())
        replies.add(text=code)
 
 def async_chat_news(bot, payload, replies, message):
-    """See a list of all your chats status/unread from telegram. Example: /news"""
+    """See a list of all your chats status/unread from telegram. Example: /news
+    you can pass the parameter private to see only the private chat like: /news private
+    you can pass the parameter full to see a full chat list like: /news full
+    pass the img parameter to see the chats profile photos like: /news img"""
     loop.run_until_complete(chat_news(bot, payload, replies, message))
 
 async def chat_info(bot, payload, replies, message):
@@ -1128,9 +1154,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     if is_auto:
        max_limit = MAX_MSG_LOAD_AUTO
        is_down = False
+       is_comment = False
     else:
        max_limit = MAX_MSG_LOAD
        is_down = message.text.lower().startswith('/down')
+       is_comment = message.text.lower().startswith('/comment')
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id)
     if not target:
@@ -1202,6 +1230,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               fwd_text = ''
               html_spoiler = None
               reactions_text = ''
+              comment_text = ''
               sender_name = None
               if show_id:
                  msg_id = '\n'+str(m.id)
@@ -1225,10 +1254,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'post') and m.post:
                  try:
                     #comentarios = await client(functions.messages.GetRepliesRequest(peer=target, msg_id=m.id, offset_id=m.id, offset_date=datetime(2018, 6, 25), add_offset=0, limit=100, max_id=0, min_id=0, hash=0 ))
-                    comentarios = await client.get_messages(target, reply_to=m.id, limit = 100)
+                    comentarios = await client.get_messages(target, reply_to=m.id, limit = 200)
                  except:
                     comentarios = None
-                 if comentarios and len(comentarios)>0:
+                 if comentarios and not is_comment:
+                    comment_text = '\n\n---\n'+str(len(comentarios))+' comentarios > /comment_'+str(m.id)
+                 if is_comment and comentarios and len(comentarios)>0:
                     comentarios.reverse()
                     if html_spoiler:
                        html_spoiler +=str(len(comentarios)) + " comentarios<hr>"
@@ -1240,15 +1271,37 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                            from_coment = str(full.users[0].first_name)
                         else:
                            from_coment = "Unknown"
-                        if coment.message:
-                           file_comment = coment.message
+                        if coment.photo:
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await coment.download_media(bytes)).decode(),coment.raw_text)
+                        elif coment.media and hasattr(coment.media,'document') and coment.media.document and hasattr(coment.media.document,'thumbs') and coment.media.document.thumbs:
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}"/></center>'.format(base64.b64encode(await coment.download_media(bytes, thumb=0)).decode(),coment.raw_text)
                         else:
-                           file_comment = "[imagen/archivo]"
-                        html_spoiler += "<br><div style='border-radius:3px;color:white;background:#7777ff'><b>"+from_coment+"</b><br>"+file_comment+"</div>"        
+                           file_comment = (coment.message or '[ARCHIVO/VIDEO]').replace('\n', '<br>')
+                        html_spoiler += "<br><div style='border-radius:10px;color:white;background:#7777ff;padding-left:5px;padding-top:5px;padding-right:5px;padding-bottom:5px'><b>"+from_coment+"</b><br>"+file_comment+"</div>"        
 
               #check if message is a forward
               if m.fwd_from:
                  fwd_text = 'Mensaje reenviado\n'
+                 if m.fwd_from.from_id:
+                    if isinstance(m.fwd_from.from_id, types.PeerUser):
+                       full = await client(GetFullUserRequest(m.fwd_from.from_id))
+                       if full.users[0].first_name:
+                          fwd_first = str(full.users[0].first_name)
+                       else:
+                          fwd_first = ""
+                       if full.users[0].last_name:
+                          fwd_last = str(full.users[0].last_name)
+                       else:
+                          fwd_last = ""
+                       fwd_text += "De: "+str(fwd_first+' '+fwd_last).strip()+"\n\n"
+                    elif isinstance(m.fwd_from.from_id, types.PeerChannel):
+                       full = await client(functions.channels.GetFullChannelRequest(channel = m.fwd_from.from_id))
+                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                          fwd_text += "De: "+str(full.chats[0].title)+"\n\n"
+                    elif isinstance(m.fwd_from.from_id, types.PeerChat):
+                       full = await client(functions.messages.GetFullChatRequest(chat_id = m.fwd_from.from_id))
+                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                          fwd_text += "De chat:"+full.chats[0].title+"\n"
 
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
@@ -1373,7 +1426,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.reactions,'results') and m.reactions.results:
                     reactions_text += "\n\n"
                     for react in m.reactions.results:
-                        reactions_text += "("+react.reaction+str(react.count)+")"
+                        reactions_text += "("+react.reaction+str(react.count)+") "
                     reactions_text += "\n\n"
 
               #check if message have document
@@ -1395,7 +1448,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           #tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
-                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -1404,7 +1457,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  no_media = False
 
               #check if message have media
@@ -1420,10 +1473,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...')
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     no_media = False
 
                  #check if message have media webpage
@@ -1470,15 +1523,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
 
                        if file_attach!= '':
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+reactions_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                        else:
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        no_media = True
 
               #send only text message
               if no_media:
-                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+reactions_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
 
               #mark message as read
               m_id = m.id
@@ -1524,9 +1577,18 @@ def async_down_chat_messages(bot, message, replies, payload):
     """Download messages files from telegram in a chat,
     you can add specific message id to download one message
     or with - sign download messages from this id number. Examples:
-    Load message #5: /down 5
-    Load message from #10: /down -10
-    Load last message in the chat: /down last"""
+    Download message #5: /down 5
+    Download message from #10: /down -10
+    Download last message in the chat: /down last"""
+    loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+
+def async_comment_chat_messages(bot, message, replies, payload):
+    """Show comments messages from telegram in a channel post,
+    you can add specific message id to show comment one message
+    or with - sign show comment messages from this id number. Examples:
+    show comments message #5: /comment 5
+    show comments messages from #10: /comment -10
+    show last comments message in the chat: /comment last"""
     loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
