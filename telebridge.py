@@ -42,27 +42,12 @@ from dropbox.exceptions import ApiError, AuthError
 import zipfile
 import base64
 
-version = "0.1.9"
+version = "0.2.0"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
 bot_home = expanduser("~")
-white_list = None
-black_list = None
-
-MAX_MSG_LOAD = 5
-MAX_MSG_LOAD_AUTO = 5
-MAX_AUTO_CHATS = 10
-MAX_SIZE_DOWN = 20485760
-MIN_SIZE_DOWN = 655360
-CAN_IMP = False
-
-#use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
-if os.getenv('WHITE_LIST'):
-   white_list = os.getenv('WHITE_LIST').split()
-elif os.getenv('BLACK_LIST'):
-   black_list = os.getenv('BLACK_LIST').split()
 
 global phonedb
 phonedb = {}
@@ -83,6 +68,9 @@ global messagedb
 #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
 messagedb = {}
 
+global unreaddb
+#{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
+unreaddb = {}
 
 global autochatsdb
 #{contact_addr:{dc_id:tg_id}}
@@ -96,6 +84,9 @@ auto_load_task = None
 
 global encode_bot_addr
 encode_bot_addr = ''
+
+global SYNC_ENABLED
+SYNC_ENABLED = 0
 
 loop = asyncio.new_event_loop()
 
@@ -252,7 +243,6 @@ def fixautochatsdb(bot):
 class AccountPlugin:
       #def __init__(self, bot:DeltaBot) -> None:
       #    self.bot = bot
-
       @account_hookimpl
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
@@ -263,11 +253,18 @@ class AccountPlugin:
 
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
+          #print(ffi_event)
           if ffi_event.name == "DC_EVENT_WARNING":
              #print('Evento warning detectado!', ffi_event)
              if ffi_event.data2 and ffi_event.data2.find("Daily user sending quota exceeded")>=0:
                 print('Limite diario de mensajes alcanzado!')
 
+          if ffi_event.name == "DC_EVENT_MSG_READ":
+             msg = str(ffi_event.data1)+':'+str(ffi_event.data2)
+             print(msg)
+             if msg in unreaddb:
+                async_read_message(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
+                del unreaddb[msg]
 
 
 @simplebot.hookimpl(tryfirst=True)
@@ -305,8 +302,32 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.account.add_account_plugin(AccountPlugin())
     bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar("telegram.jpeg")
-    bot.account.set_config("mdns_enabled","0")
     bot.account.set_config("delete_device_after","21600")
+    global MAX_MSG_LOAD
+    MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
+    global MAX_MSG_LOAD_AUTO
+    MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
+    global MAX_AUTO_CHATS
+    MAX_AUTO_CHATS = bot.get('MAX_AUTO_CHATS') or 10
+    global MAX_SIZE_DOWN
+    MAX_SIZE_DOWN = bot.get('MAX_SIZE_DOWN') or 20485760
+    global MIN_SIZE_DOWN
+    MIN_SIZE_DOWN = bot.get('MIN_SIZE_DOWN') or 655360
+    global CAN_IMP
+    CAN_IMP = bot.get('CAN_IMP') or 0
+    global SYNC_ENABLED
+    SYNC_ENABLED = bot.get('SYNC_ENABLED') or 0
+    if SYNC_ENABLED:
+       bot.account.set_config("mdns_enabled","1")
+    global white_list
+    global black_list
+    #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
+    white_list = os.getenv('WHITE_LIST') or bot.get('WHITE_LIST')
+    black_list = os.getenv('BLACK_LIST') or bot.get('BLACK_LIST')
+    if white_list:
+       white_list = white_list.split()
+    if black_list:
+       black_list = black_list.split()
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -333,7 +354,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
     bot.commands.register(name = "/news" ,func = async_chat_news)
     bot.commands.register(name = "/info" ,func = async_chat_info)
-
+    bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -443,6 +464,19 @@ async def convertsticker(infilepath,outfilepath):
     an = importer.process(infilepath)
     an.scale(128,128)
     exporter.process(an, outfilepath, lossless=False, method=3, quality=50, skip_frames=10)
+
+async def read_message(contacto,target,tg_id):
+    try:
+       client = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       await client.connect()
+       mensajes = await client.get_messages(target,ids=[int(tg_id)])
+       await mensajes[0].mark_read()
+    except:
+       code = str(sys.exc_info())
+       print(code)
+       
+def async_read_message(contacto,target,tg_id):
+    loop.run_until_complete(read_message(contacto, target, tg_id))
 
 async def chat_news(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
@@ -1545,7 +1579,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     os.remove(bot_attach)
               limite+=1
               register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
-              await m.mark_read()
+              if SYNC_ENABLED and is_auto:
+                 #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
+                 unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
+              else:
+                 await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
@@ -2015,7 +2053,10 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                      if not SYNC_ENABLED or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
+                         await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                      else:
+                         print('Mensajes por leer en chat '+str(inkey))
                    except:
                       code = str(sys.exc_info())
                       print(code)
@@ -2073,6 +2114,60 @@ async def c_run(payload, replies, message):
 def async_run(payload, replies, message):
     """Run command inside a async TelegramClient def. Note that all code run with await prefix, results are maybe a coorutine. Example: /exec client.get_me()"""
     loop.run_until_complete(c_run(payload, replies, message))
+
+def bot_settings(bot: DeltaBot, payload, replies, message: Message):
+    """Set or show bot settings like:
+    /setting CAN_IMP 1"""
+    available_settings = """<pre>
+    SETTING             VALUES  HINT
+    CAN_IMP             0/1     Enable/disabled impersonating (names in titles)
+    SYNC_ENABLED        0/1     Enable/disabled synchronize mode (mark telegram message as read when read in deltachat)
+    MAX_MSG_LOAD        1..200  Max number of message receiving when you send /more
+    MAX_MSG_LOAD_AUTO   1..200  Max number of message receiving in auto at the time
+    MAX_AUTO_CHATS      0...    Max number of auto chats that user can set
+    MAX_SIZE_DOWN       0...    Max file size of you can down with /down (bytes)
+    MIN_SIZE_DOWN       0...    Minimum file size that bot download automatically (bytes)
+    </pre>"""
+    global CAN_IMP
+    global SYNC_ENABLED
+    global MAX_MSG_LOAD
+    global MAX_MSG_LOAD_AUTO
+    global MAX_AUTO_CHATS
+    global MAX_SIZE_DOWN
+    global MIN_SIZE_DOWN
+    parametros = payload.split()
+    if len(parametros)<1:
+       replies.add(text = 'See available settings below:', html=available_settings)
+    if len(parametros)==1:
+       replies.add(text=bot.get(parametros[0].upper()))
+    if len(parametros)>1:
+       paramtext = ""
+       for w in parametros[1:]:
+           paramtext = paramtext+" "+w
+       if paramtext.isnumeric():
+          paramtext = int(paramtext)
+       if parametros[0].upper()=='CAN_IMP':
+          CAN_IMP = paramtext
+       elif parametros[0].upper()=='SYNC_ENABLED':
+          SYNC_ENABLED = paramtext
+          if paramtext==1:
+             bot.account.set_config("mdns_enabled","1")
+       elif parametros[0].upper()=='MAX_AUTO_CHATS':
+          MAX_AUTO_CHATS = paramtext
+       elif parametros[0].upper()=='MAX_MSG_LOAD':
+          MAX_MSG_LOAD = paramtext
+       elif parametros[0].upper()=='MAX_MSG_LOAD_AUTO':
+          MAX_MSG_LOAD_AUTO = paramtext
+       elif parametros[0].upper()=='MAX_SIZE_DOWN':
+          MAX_SIZE_DOWN = paramtext
+       elif parametros[0].upper()=='MIN_SIZE_DOWN':
+          MIN_SIZE_DOWN = paramtext
+       else:
+          replies.add(text = 'Unknown setting!, available settings below', html = available_settings)
+          return
+       bot.set(parametros[0].upper(), paramtext)
+       if DBXTOKEN:
+          backup_db()
 
 @simplebot.command(admin=True)
 def stats(replies) -> None:
