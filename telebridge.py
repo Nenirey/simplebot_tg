@@ -263,7 +263,7 @@ class AccountPlugin:
              msg = str(ffi_event.data1)+':'+str(ffi_event.data2)
              print(msg)
              if msg in unreaddb:
-                async_read_message(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
+                async_read_unread(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
                 del unreaddb[msg]
 
 
@@ -472,7 +472,7 @@ async def convertsticker(infilepath,outfilepath):
     an.scale(128,128)
     exporter.process(an, outfilepath, lossless=False, method=3, quality=50, skip_frames=10)
 
-async def read_message(contacto,target,tg_id):
+async def read_unread(contacto,target,tg_id):
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
        await client.connect()
@@ -483,8 +483,8 @@ async def read_message(contacto,target,tg_id):
        code = str(sys.exc_info())
        print(code)
        
-def async_read_message(contacto,target,tg_id):
-    loop.run_until_complete(read_message(contacto, target, tg_id))
+def async_read_unread(contacto,target,tg_id):
+    loop.run_until_complete(read_unread(contacto, target, tg_id))
 
 async def chat_news(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
@@ -1217,7 +1217,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        os.mkdir(contacto)
 
     try:
-       client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=False, retry_delay = 16)
+       client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=not is_auto, retry_delay = 16)
        await client.connect()
        await client.get_dialogs()
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
@@ -1255,7 +1255,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
-       m_id = -0
+       m_id = -1
+       dc_msg = -1
        for m in all_messages:
            if m and limite<max_limit:
               mquote = ''
@@ -1587,15 +1588,16 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     os.remove(bot_attach)
               limite+=1
               register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
-              if SYNC_ENABLED and is_auto:
-                 #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
-                 unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
-              else:
+              if SYNC_ENABLED==0 or not is_auto:
                  await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
               break
+       if SYNC_ENABLED and is_auto:
+          #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
+          if m_id>-1 and dc_msg>-1:
+             unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
@@ -2061,7 +2063,7 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      if not SYNC_ENABLED or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
+                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
                          await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
                       else:
                          print('Mensajes por leer en chat '+str(inkey))
@@ -2152,6 +2154,7 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
        paramtext = ""
        for w in parametros[1:]:
            paramtext = paramtext+" "+w
+       paramtext = paramtext.strip()
        if paramtext.isnumeric():
           paramtext = int(paramtext)
        if parametros[0].upper()=='CAN_IMP':
@@ -2176,6 +2179,7 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
        bot.set(parametros[0].upper(), paramtext)
        if DBXTOKEN:
           backup_db()
+       replies.add(text = 'Setting '+parametros[0]+' set to '+str(paramtext)+' successfully!')
 
 @simplebot.command(admin=True)
 def stats(replies) -> None:
