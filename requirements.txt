@@ -9,7 +9,7 @@ itsdangerous
 Jinja2
 requests
 git+https://github.com/Nenirey/Telethon@master#telethon
-deltachat==1.68
+deltachat==1.70
 git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
 psutil
