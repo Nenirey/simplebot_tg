@@ -304,23 +304,30 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.account.set_avatar("telegram.jpeg")
     bot.account.set_config("delete_device_after","21600")
     global MAX_MSG_LOAD
-    MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
     global MAX_MSG_LOAD_AUTO
-    MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
     global MAX_AUTO_CHATS
-    MAX_AUTO_CHATS = bot.get('MAX_AUTO_CHATS') or 10
     global MAX_SIZE_DOWN
-    MAX_SIZE_DOWN = bot.get('MAX_SIZE_DOWN') or 20485760
     global MIN_SIZE_DOWN
-    MIN_SIZE_DOWN = bot.get('MIN_SIZE_DOWN') or 655360
     global CAN_IMP
-    CAN_IMP = bot.get('CAN_IMP') or 0
     global SYNC_ENABLED
-    SYNC_ENABLED = bot.get('SYNC_ENABLED') or 0
-    if SYNC_ENABLED:
-       bot.account.set_config("mdns_enabled","1")
     global white_list
     global black_list
+    MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
+    MAX_MSG_LOAD = int(MAX_MSG_LOAD)
+    MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
+    MAX_MSG_LOAD_AUTO = int(MAX_MSG_LOAD_AUTO)
+    MAX_AUTO_CHATS = bot.get('MAX_AUTO_CHATS') or 10
+    MAX_AUTO_CHATS = int(MAX_AUTO_CHATS)
+    MAX_SIZE_DOWN = bot.get('MAX_SIZE_DOWN') or 20485760
+    MAX_SIZE_DOWN = int(MAX_SIZE_DOWN)
+    MIN_SIZE_DOWN = bot.get('MIN_SIZE_DOWN') or 655360
+    MIN_SIZE_DOWN = int(MIN_SIZE_DOWN)
+    CAN_IMP = bot.get('CAN_IMP') or 0
+    CAN_IMP = int(CAN_IMP)
+    SYNC_ENABLED = bot.get('SYNC_ENABLED') or 0
+    SYNC_ENABLED = int(SYNC_ENABLED)
+    if SYNC_ENABLED:
+       bot.account.set_config("mdns_enabled","1")
     #use env to add to the lists like "user1@domine.com user2@domine.com" with out ""
     white_list = os.getenv('WHITE_LIST') or bot.get('WHITE_LIST')
     black_list = os.getenv('BLACK_LIST') or bot.get('BLACK_LIST')
@@ -471,6 +478,7 @@ async def read_message(contacto,target,tg_id):
        await client.connect()
        mensajes = await client.get_messages(target,ids=[int(tg_id)])
        await mensajes[0].mark_read()
+       await client.disconnect()
     except:
        code = str(sys.exc_info())
        print(code)
@@ -1209,7 +1217,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        os.mkdir(contacto)
 
     try:
-       client = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=False, retry_delay = 16)
        await client.connect()
        await client.get_dialogs()
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
@@ -2063,7 +2071,7 @@ async def auto_load(bot, message, replies):
                    time.sleep(0.100)
         except:
            print('Error in autochatsdb dict')
-        time.sleep(15)
+        time.sleep(16)
 
 def start_updater(bot, message, replies):
     """Start scheduler updater to get telegram messages. /start"""
