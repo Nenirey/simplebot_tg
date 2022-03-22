@@ -362,6 +362,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/news" ,func = async_chat_news)
     bot.commands.register(name = "/info" ,func = async_chat_info)
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
+    bot.commands.register(name = "/react" ,func = async_react_button)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -476,14 +477,15 @@ async def read_unread(contacto,target,tg_id):
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
        await client.connect()
-       mensajes = await client.get_messages(target,ids=[int(tg_id)])
+       await client.get_dialogs()
+       mensajes = await client.get_messages(target, ids=[int(tg_id)])
        await mensajes[0].mark_read()
        await client.disconnect()
     except:
        code = str(sys.exc_info())
-       print(code)
+       print('Error marcando mensaje como leido\n'+code)
        
-def async_read_unread(contacto,target,tg_id):
+def async_read_unread(contacto, target, tg_id):
     loop.run_until_complete(read_unread(contacto, target, tg_id))
 
 async def chat_news(bot, payload, replies, message):
@@ -1169,7 +1171,6 @@ async def click_button(message, replies, payload):
        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
-       tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
        all_messages = await client.get_messages(target, ids = [int(parametros[0])])
        n_column = int(parametros[1])
        if len(parametros)<3:
@@ -1188,6 +1189,65 @@ def async_click_button(bot, message, replies, payload):
     loop.run_until_complete(click_button(message = message, replies = replies, payload = payload))
     parametros = payload.split()
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0], dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+
+async def react_button(message, replies, payload):
+    parametros = payload.split()
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para reaccionar!')
+       return
+    if message.quote:
+       t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+       if not t_reply:
+          replies.add(text = 'No se encontro la referencia de este mensaje!')
+          return
+    target = get_tg_id(message.chat)
+    if not target:
+       replies.add(text = 'Este no es un chat de telegram!')
+       return
+    try:
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       if len(parametros)<1:
+          pchat = await client.get_input_entity(target)
+          av_reactions = None
+          if isinstance(pchat, types.InputPeerChannel):
+             full_pchat = await client(functions.channels.GetFullChannelRequest(channel = pchat))
+             if hasattr(full_pchat.full_chat,'available_reactions') and full_pchat.full_chat.available_reactions:
+                av_reactions = full_pchat.full_chat.available_reactions             
+          elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
+               full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
+               if hasattr(full_pchat.full_user,"available_reactions") and full_pchat.full_user.available_reactions:
+                  av_reactions = full_pchat.full_user.available_reactions
+          elif isinstance(pchat, types.InputPeerChat):
+               print('Hemos encontrado un InputPeerChat: '+str(f_id))
+               full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
+               if hasattr(full_pchat,'available_reactions') and full_pchat.available_reactions:
+                  av_reactions = full_pchat.available_reactions
+          if av_reactions:
+             if len(av_reactions)>0:
+                replies.add(text = "Reacciones disponibles en este chat:\n\n"+''.join([r for r in av_reactions]))
+             else:
+                replies.add(text = "No se permiten las reacciones en este chat!")
+          else:
+             full_reactions = await client(functions.messages.GetAvailableReactionsRequest(0))
+             text_reactions = ''
+             for r in full_reactions.reactions:
+                 text_reactions+=r.reaction
+             replies.add(text = "Reacciones disponibles en este chat:\n\n"+text_reactions)
+       else:
+          await client.send_reaction(target,t_reply,parametros[0])
+       await client.disconnect()
+    except:
+       code = str(sys.exc_info())
+       replies.add(text=code)
+
+def async_react_button(bot, message, replies, payload):
+    """Send reaction to message repling it like: /react ❤"""
+    loop.run_until_complete(react_button(message = message, replies = replies, payload = payload))
+    t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=str(t_reply), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
     contacto = dc_contact
@@ -1469,7 +1529,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.reactions,'results') and m.reactions.results:
                     reactions_text += "\n\n"
                     for react in m.reactions.results:
-                        reactions_text += "("+react.reaction+str(react.count)+") "
+                        reactions_text += "("+('•' if react.chosen else '')+react.reaction+str(react.count)+") "
                     reactions_text += "\n\n"
 
               #check if message have document
@@ -2063,7 +2123,7 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
+                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1 or bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('State: Read')>0:
                          await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
                       else:
                          print('Mensajes por leer en chat '+str(inkey))
