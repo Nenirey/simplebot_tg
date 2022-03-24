@@ -10,7 +10,6 @@ Jinja2
 requests
 #git+https://github.com/Nenirey/Telethon@master#telethon
 newthon
-simplebot
 git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
 psutil
