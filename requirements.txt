@@ -8,9 +8,10 @@ idna
 itsdangerous
 Jinja2
 requests
+simplebot
 #git+https://github.com/Nenirey/Telethon@master#telethon
 newthon
-git+https://github.com/Nenirey/simplebot@master#simplebot
+#git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
 psutil
 git+https://gitlab.com/mattbas/python-lottie@master#lottie
