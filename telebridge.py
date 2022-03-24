@@ -270,10 +270,11 @@ class AccountPlugin:
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
     """Check that the sender is not in the black or white list."""
-    if white_list and message.get_sender_contact().addr not in white_list:
-       print('Usuario '+str(message.get_sender_contact().addr)+' no esta en la lista blanca')
+    sender_addr = message.get_sender_contact().addr
+    if white_list and sender_addr!=admin_addr and sender_addr not in white_list:
+       print('Usuario '+str(sender_addr)+' no esta en la lista blanca')
        return True
-    if black_list and message.get_sender_contact().addr in black_list:
+    if black_list and sender_addr!=admin_addr and sender_addr in black_list:
        print('Usuario '+str(message.get_sender_contact().addr)+' esta en la lista negra')
        return True
     """
@@ -1312,6 +1313,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              all_messages = await client.get_messages(target, limit = 1)
           else:
              all_messages = await client.get_messages(target, limit = sin_leer)
+             if payload and payload.startswith('+') and payload.lstrip('+').isnumeric() and bot.is_admin(contacto):
+                max_limit = int(payload.lstrip('+'))
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
        if sin_leer>0 or load_history or show_id:
           all_messages.reverse()
@@ -2113,6 +2116,21 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
     except:
        code = str(sys.exc_info())
     replies.add(text=code or "echo")
+    
+def confirm_unread(bot: DeltaBot, chat_id):
+    chat_messages = bot.get_chat(chat_id).get_messages()
+    if len(chat_messages)<1:
+       return True
+    elif chat_messages[-1].get_message_info().find('\nState: Read')>0 or chat_messages[-1].get_message_info().find('\nState: Seen')>0 or chat_messages[-1].get_message_info().find('\nRead: ')>0:
+       par_key = str(chat_id)+':'+str(chat_messages[-1].id)
+       if par_key in unreaddb:
+          print('Confirmando lectura de mensaje '+par_key)
+          async_read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2])
+          del unreaddb[par_key]
+       return True
+    else:
+       return False
+    return False
 
 async def auto_load(bot, message, replies):
     global autochatsdb
@@ -2123,7 +2141,7 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1 or bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('State: Read')>0:
+                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1 or confirm_unread(bot, int(inkey)):
                          await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
                       else:
                          print('Mensajes por leer en chat '+str(inkey))
@@ -2197,6 +2215,8 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
     MAX_AUTO_CHATS      0...    Max number of auto chats that user can set
     MAX_SIZE_DOWN       0...    Max file size of you can down with /down (bytes)
     MIN_SIZE_DOWN       0...    Minimum file size that bot download automatically (bytes)
+    WHITE_LIST          mails   mails addr separate by space like user1@example.com user2@example.com
+    BLACK_LIST          mails   mails addr separate by space like user1@example.com user2@example.com
     </pre>"""
     global CAN_IMP
     global SYNC_ENABLED
@@ -2205,6 +2225,8 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
     global MAX_AUTO_CHATS
     global MAX_SIZE_DOWN
     global MIN_SIZE_DOWN
+    global white_list 
+    global black_list
     parametros = payload.split()
     if len(parametros)<1:
        replies.add(text = 'See available settings below:', html=available_settings)
@@ -2233,6 +2255,10 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
           MAX_SIZE_DOWN = paramtext
        elif parametros[0].upper()=='MIN_SIZE_DOWN':
           MIN_SIZE_DOWN = paramtext
+       elif parametros[0].upper()=='WHITE_LIST':
+          white_list = paramtext.split()
+       elif parametros[0].upper()=='BLACK_LIST':
+          black_list = paramtext.split()
        else:
           replies.add(text = 'Unknown setting!, available settings below', html = available_settings)
           return
