@@ -10,7 +10,7 @@ Jinja2
 requests
 #git+https://github.com/Nenirey/Telethon@master#telethon
 newthon
-deltachat==1.70.0
+deltachat
 git+https://github.com/Nenirey/simplebot@master#simplebot
 mock
 psutil
