@@ -278,7 +278,7 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
        return True
     """
     if message.chat.is_group():
-       if get_tg_id(message.chat):
+       if get_tg_id(message.chat, bot):
           contactos = message.chat.get_contacts()
           if len(contactos)>2:
              if contactos.index(message.get_sender_contact())>1:
@@ -722,11 +722,11 @@ async def pin_messages(bot, message, replies):
        if replies:
           replies.add(text=code)
 
-def async_pin_messages(message, replies):
+def async_pin_messages(bot, message, replies):
     """Pin message in chats with right permission repling it, example:
     /pin
     """
-    loop.run_until_complete(pin_messages(message, replies))
+    loop.run_until_complete(pin_messages(bot, message, replies))
 
 
 async def forward_message(bot, message, replies, payload):
@@ -766,12 +766,12 @@ async def forward_message(bot, message, replies, payload):
        print(code)
        replies.add(text=code)
 
-def async_forward_message(message, replies, payload):
+def async_forward_message(bot, message, replies, payload):
     """Forward message to other chats using the message id and chat id, example:
     /forward 3648 me
     this forward the message id 3648 to your saved messages
     """
-    loop.run_until_complete(forward_message(message, replies, payload))
+    loop.run_until_complete(forward_message(bot, message, replies, payload))
 
 
 def list_chats(replies, message, payload):
@@ -1796,9 +1796,9 @@ async def echo_filter(bot, message, replies):
        replies.add(text=code)
 
 @simplebot.filter
-def async_echo_filter(message, replies):
+def async_echo_filter(bot, message, replies):
     """Write direct in chat bridge to write to telegram chat"""
-    loop.run_until_complete(echo_filter(message, replies))
+    loop.run_until_complete(echo_filter(bot, message, replies))
 
 async def send_cmd(bot, message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
@@ -1832,7 +1832,7 @@ async def send_cmd(bot, message, replies, payload):
 
 def async_send_cmd(bot, message, replies, payload):
     """Send command to telegram chats. Example /b /help"""
-    loop.run_until_complete(send_cmd(message, replies, payload))
+    loop.run_until_complete(send_cmd(bot, message, replies, payload))
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload='', dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
