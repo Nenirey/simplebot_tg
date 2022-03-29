@@ -597,9 +597,9 @@ def async_chat_news(bot, payload, replies, message):
     loop.run_until_complete(chat_news(bot, payload, replies, message))
 
 
- def link_to(bot, payload, replies, message):
-     """Link chat with a Telegram chat"""
-     bot.set(str(message.chat.id), payload)
+def link_to(bot, payload, replies, message):
+    """Link chat with a Telegram chat"""
+    bot.set(str(message.chat.id), payload)
 
 async def chat_info(bot, payload, replies, message):
     f_id = get_tg_id(message.chat, bot)
