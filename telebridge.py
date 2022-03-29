@@ -247,9 +247,8 @@ class AccountPlugin:
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_group():
-             if get_tg_id(chat, DeltaBot):
-                if DBXTOKEN:
-                   backup_db()
+             if DBXTOKEN:
+                backup_db()
 
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
