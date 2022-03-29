@@ -1222,7 +1222,7 @@ async def click_button(bot, message, replies, payload):
 
 def async_click_button(bot, message, replies, payload):
     """Make click on a message bot button"""
-    loop.run_until_complete(click_button(message = message, replies = replies, payload = payload))
+    loop.run_until_complete(click_button(bot = bot, message = message, replies = replies, payload = payload))
     parametros = payload.split()
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0], dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
@@ -1280,7 +1280,7 @@ async def react_button(bot, message, replies, payload):
 
 def async_react_button(bot, message, replies, payload):
     """Send reaction to message repling it like: /react ❤"""
-    loop.run_until_complete(react_button(message = message, replies = replies, payload = payload))
+    loop.run_until_complete(react_button(bot = bot, message = message, replies = replies, payload = payload))
     t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=str(t_reply), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
