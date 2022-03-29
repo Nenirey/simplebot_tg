@@ -247,7 +247,7 @@ class AccountPlugin:
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_group():
-             if get_tg_id(chat):
+             if get_tg_id(chat, bot:DeltaBot):
                 if DBXTOKEN:
                    backup_db()
 
@@ -364,6 +364,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/info" ,func = async_chat_info)
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
     bot.commands.register(name = "/react" ,func = async_react_button)
+    bot.commands.register(name = "/link2" ,func = link_to, admin = True)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -439,9 +440,15 @@ def find_register_msg(contacto, dc_id, tg_msg):
    else:
       return
 
-def get_tg_id(chat):
-    dchat = chat.get_name()
-    tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
+def get_tg_id(chat, bot):
+    f_id = bot.get(str(chat.id))
+    if f_id:
+       tg_ids = [f_id]
+    else:
+       dchat = chat.get_name()
+       tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
+       if len(tg_ids)>0:
+          bot.set(str(chat.id),tg_ids[-1])
     if len(tg_ids)>0:
        if tg_ids[-1].lstrip('-').isnumeric():
           f_id = int(tg_ids[-1])
@@ -589,8 +596,13 @@ def async_chat_news(bot, payload, replies, message):
     pass the img parameter to see the chats profile photos like: /news img"""
     loop.run_until_complete(chat_news(bot, payload, replies, message))
 
+
+ def link_to(bot, payload, replies, message):
+     """Link chat with a Telegram chat"""
+     bot.set(str(message.chat.id), payload)
+
 async def chat_info(bot, payload, replies, message):
-    f_id = get_tg_id(message.chat)  
+    f_id = get_tg_id(message.chat, bot)
     if not f_id:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -687,11 +699,11 @@ def async_chat_info(bot, payload, replies, message):
     """Show message information from telegram. Example: reply a message with /info"""
     loop.run_until_complete(chat_info(bot, payload, replies, message))
 
-async def pin_messages(message, replies):
+async def pin_messages(bot, message, replies):
     if not message.quote:
        replies.add(text = "Debe responder a un mensaje para fijarlo")
        return
-    f_id = get_tg_id(message.chat)
+    f_id = get_tg_id(message.chat, bot)
     if not f_id:
        replies.add(text = "Este no es un chat de telegram!")
        return
@@ -718,11 +730,11 @@ def async_pin_messages(message, replies):
     loop.run_until_complete(pin_messages(message, replies))
 
 
-async def forward_message(message, replies, payload):
+async def forward_message(bot, message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para reenviar mensajes!')
        return
-    f_id = get_tg_id(message.chat)
+    f_id = get_tg_id(message.chat, bot)
     if not f_id:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -781,7 +793,7 @@ async def add_auto_chats(bot, replies, message):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
        return
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -894,7 +906,7 @@ async def load_delta_chats(contacto, replies = None):
 def async_load_delta_chats(message, replies):
     loop.run_until_complete(load_delta_chats(contacto=message.get_sender_contact().addr, replies=replies))
 
-def remove_chat(payload, replies, message):
+def remove_chat(bot, payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
        you can pass the all parametre to remove all chats like: /remove all or a telegram chat id
     like: /remove -10023456789"""
@@ -905,7 +917,7 @@ def remove_chat(payload, replies, message):
        replies.add(text = 'No tiene ningun chat vinculado!')
        return
     if not payload or payload =='':
-       target = get_tg_id(message.chat)
+       target = get_tg_id(message.chat, bot)
        if not target:
           replies.add(text = 'Este no es un chat de Telegram!')
           return
@@ -1118,10 +1130,16 @@ async def updater(bot, payload, replies, message):
               else:
                  find_only = True
            if str(d.id) not in chatdb[message.get_sender_contact().addr] and not private_only and not find_only:
-              titulo = str(ttitle)+' ['+str(d.id)+']'
-              if my_id == d.id:
-                 titulo = 'Mensajes guardados ['+str(d.id)+']'
+              if DBXTOKEN:
+                 titulo = str(ttitle)
+                 if my_id == d.id:
+                    titulo = 'Mensajes guardados'
+              else:
+                 titulo = str(ttitle)+' ['+str(d.id)+']'
+                 if my_id == d.id:
+                    titulo = 'Mensajes guardados ['+str(d.id)+']'
               chat_id = bot.create_group(titulo, [contacto])
+              bot.set(str(chat_id),str(d.id))
               img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
               try:
                  if img and os.path.exists(img):
@@ -1156,7 +1174,7 @@ def async_updater(bot, payload, replies, message):
     if message.get_sender_contact().addr in logindb:
        async_save_delta_chats(replies = replies, message = message)
 
-async def click_button(message, replies, payload):
+async def click_button(bot, message, replies, payload):
     parametros = payload.split()
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión usar los botones!')
@@ -1164,7 +1182,7 @@ async def click_button(message, replies, payload):
     if len(parametros)<2:
        replies.add(text = 'Faltan parametros, debe proporcionar el id de mensaje y al menos el numero de columna')
        return
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -1191,7 +1209,7 @@ def async_click_button(bot, message, replies, payload):
     parametros = payload.split()
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=parametros[0], dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
-async def react_button(message, replies, payload):
+async def react_button(bot, message, replies, payload):
     parametros = payload.split()
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para reaccionar!')
@@ -1201,7 +1219,7 @@ async def react_button(message, replies, payload):
        if not t_reply:
           replies.add(text = 'No se encontro la referencia de este mensaje!')
           return
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -1263,7 +1281,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        is_down = message.text.lower().startswith('/down')
        is_comment = message.text.lower().startswith('/comment')
     myreplies = Replies(bot, logger=bot.logger)
-    target = get_tg_id(chat_id)
+    target = get_tg_id(chat_id, bot)
     if not target:
        myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
        myreplies.send_reply_messages()
@@ -1667,6 +1685,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        if load_history:
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
+       if DBXTOKEN:
+          if dchat!=str(ttitle):
+             print('Actualizando nombre de chat...')
+             chat_id.set_name(str(ttitle))
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -1703,14 +1725,14 @@ def async_comment_chat_messages(bot, message, replies, payload):
     loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 
-async def echo_filter(message, replies):
+async def echo_filter(bot, message, replies):
     """Write direct in chat to write a telegram chat"""
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
     dchat = message.chat.get_name()
 
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -1779,12 +1801,12 @@ def async_echo_filter(message, replies):
     """Write direct in chat bridge to write to telegram chat"""
     loop.run_until_complete(echo_filter(message, replies))
 
-async def send_cmd(message, replies, payload):
+async def send_cmd(bot, message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
 
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -1839,7 +1861,7 @@ async def inline_cmd(bot, message, replies, payload):
     else:
        replies.add(text = 'Debe proporcionar el nombre del bot y el termino de búsqueda, ejemplo: /inline gif gaticos\nAqui hay otros ejemplos probados:\n'+example_inline)
        return
-    target = get_tg_id(message.chat)
+    target = get_tg_id(message.chat, bot)
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
        await client.connect()
@@ -2085,9 +2107,12 @@ async def preview_chats(bot, payload, replies, message):
               else:
                  if hasattr(pchat, 'first_name') and pchat.first_name:
                     ttitle = str(pchat.first_name)
-
-           titulo = str(ttitle)+' ['+str(uid)+']'
+           if DBXTOKEN:
+              titulo = str(ttitle)
+           else:
+              titulo = str(ttitle)+' ['+str(uid)+']'
            chat_id = bot.create_group(titulo, [contacto])
+           bot.set(str(chat_id),str(uid))
            try:
                img = await client.download_profile_photo(uid, message.get_sender_contact().addr)
                if img and os.path.exists(img):
