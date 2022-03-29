@@ -241,13 +241,13 @@ def fixautochatsdb(bot):
 
 
 class AccountPlugin:
-      def __init__(self, bot:DeltaBot) -> None:
-          self.bot = bot
+      #def __init__(self, bot:DeltaBot) -> None:
+      #    self.bot = bot
       @account_hookimpl
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_group():
-             if get_tg_id(chat, bot):
+             if get_tg_id(chat, DeltaBot):
                 if DBXTOKEN:
                    backup_db()
 
