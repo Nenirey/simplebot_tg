@@ -117,9 +117,9 @@ if DBXTOKEN:
          
 def get_dbxtoken(bot, replies, message, payload):
     "Get fresh Dropbox Token (DBXTOKEN)"
-     global authorize_url 
-     authorize_url = auth_flow.start()
-     replies.add(text='Por favor acceda a la siguiente URI, preciones Allow y copie el codigo de autorizacion y luego envielo aqui:\n\n'+str(authorize_url)) 
+    global authorize_url 
+    authorize_url = auth_flow.start()
+    replies.add(text='Por favor acceda a la siguiente URI, preciones Allow y copie el codigo de autorizacion y luego envielo aqui:\n\n'+str(authorize_url)) 
      
          
 def backup(backup_path):
