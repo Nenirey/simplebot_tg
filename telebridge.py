@@ -115,12 +115,6 @@ if DBXTOKEN:
        sys.exit("ERROR: Invalid access token; try re-generating an "
                 "access token from the app console on the web.")
          
-def get_dbxtoken(bot, replies, message, payload):
-    "Get fresh Dropbox Token (DBXTOKEN)"
-    global authorize_url 
-    authorize_url = auth_flow.start()
-    replies.add(text='Por favor acceda a la siguiente URI, preciones Allow y copie el codigo de autorizacion y luego envielo aqui:\n\n'+str(authorize_url)) 
-     
          
 def backup(backup_path):
     with open(backup_path, 'rb') as f:
@@ -381,7 +375,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
     bot.commands.register(name = "/react" ,func = async_react_button)
     bot.commands.register(name = "/link2" ,func = link_to, admin = True)
-    bot.commands.register(name = "/dbxtoken" ,func = get_dbktoken, admin = True)
+    bot.commands.register(name = "/dbxtoken" ,func = get_dbxtoken, admin = True)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -408,6 +402,12 @@ def deltabot_start(bot: DeltaBot) -> None:
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
+def get_dbxtoken(bot, replies, message, payload):
+    "Get fresh Dropbox Token (DBXTOKEN)"
+    global authorize_url 
+    authorize_url = auth_flow.start()
+    replies.add(text='Por favor acceda a la siguiente URI, preciones Allow y copie el codigo de autorizacion y luego envielo aqui:\n\n'+str(authorize_url)) 
+     
 def hide_spoiler(s_text,offset,tlen):
     h_text = '▚'*tlen
     mystring = h_text.join([s_text[:offset],s_text[offset+tlen:]])
