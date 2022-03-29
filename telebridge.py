@@ -39,6 +39,7 @@ from lottie.utils.stripper import float_strip, heavy_strip
 import dropbox
 from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError, AuthError
+from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
 
@@ -88,23 +89,39 @@ encode_bot_addr = ''
 global SYNC_ENABLED
 SYNC_ENABLED = 0
 
+global authorize_url
+authorize_url = None
+
 loop = asyncio.new_event_loop()
 
 #Secure save storage to use in non persistent storage
 DBXTOKEN = os.getenv('DBXTOKEN')
+APP_KEY = os.getenv('APP_KEY')
 global LOGINFILE
 LOGINFILE = ''
 global AUTOCHATFILE
 AUTOCHATFILE = ''
+ 
 if DBXTOKEN:
-   dbx = dropbox.Dropbox(DBXTOKEN)
+   if APP_KEY:
+      auth_flow = DropboxOAuth2FlowNoRedirect(APP_KEY, use_pkce=True, token_access_type='offline')
+      dbx = Dropbox(oauth2_refresh_token=DBXTOKEN, app_key=APP_KEY)
+   else:   
+      dbx = dropbox.Dropbox(DBXTOKEN)
    # Check that the access token is valid
    try:
       dbx.users_get_current_account()
    except AuthError:
        sys.exit("ERROR: Invalid access token; try re-generating an "
                 "access token from the app console on the web.")
-
+         
+def get_dbxtoken(bot, replies, message, payload):
+    "Get fresh Dropbox Token (DBXTOKEN)"
+     global authorize_url 
+     authorize_url = auth_flow.start()
+     replies.add(text='Por favor acceda a la siguiente URI, preciones Allow y copie el codigo de autorizacion y luego envielo aqui:\n\n'+str(authorize_url)) 
+     
+         
 def backup(backup_path):
     with open(backup_path, 'rb') as f:
         print("Uploading " + backup_path + " to Dropbox...")
@@ -364,6 +381,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
     bot.commands.register(name = "/react" ,func = async_react_button)
     bot.commands.register(name = "/link2" ,func = link_to, admin = True)
+    bot.commands.register(name = "/dbxtoken" ,func = get_dbktoken, admin = True)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -1798,6 +1816,15 @@ async def echo_filter(bot, message, replies):
 @simplebot.filter
 def async_echo_filter(bot, message, replies):
     """Write direct in chat bridge to write to telegram chat"""
+    global authorize_url  
+    if authorize_url and not message.chat.is_group():
+       try:
+          oauth_result = auth_flow.finish(message.text)
+          replies.add(text=oauth_result.refresh_token)
+       except Exception as e: 
+          replies.add(text=str(e))
+       authorize_url = None
+       return
     loop.run_until_complete(echo_filter(bot, message, replies))
 
 async def send_cmd(bot, message, replies, payload):
