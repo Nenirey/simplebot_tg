@@ -22,8 +22,10 @@ pip install -r requirements.txt
   - The email bot password 
 - ADMIN
   - Your own email as bot admin
+- APP_KEY
+  - (Optional) Get from [Here](https://www.dropbox.com/developers/apps/create).
 - DBXTOKEN
-  - Get from [Here](https://www.dropbox.com/developers/apps/create).
+  - (Optional) Get from [Here](https://www.dropbox.com/developers/apps/create).
 
 ## Run local
 
