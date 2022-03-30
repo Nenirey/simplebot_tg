@@ -2285,6 +2285,7 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
     MIN_SIZE_DOWN       0...    Minimum file size that bot download automatically (bytes)
     WHITE_LIST          mails   mails addr separate by space like user1@example.com user2@example.com
     BLACK_LIST          mails   mails addr separate by space like user1@example.com user2@example.com
+    UPDATE_DELAY        0...    Seconds to delay when get automatic chats messages (Default 16) less can cause FloodWaitError
     </pre>"""
     global CAN_IMP
     global SYNC_ENABLED
