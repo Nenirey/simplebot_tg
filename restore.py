@@ -7,6 +7,7 @@ import zipfile
 import urllib.parse
 
 DBXTOKEN = os.getenv('DBXTOKEN')
+APP_KEY = os.getenv('APP_KEY')
 ADDR = os.getenv('ADDR')
 botzipdb = './'+urllib.parse.quote(ADDR, safe = '')+'.zip'
 
@@ -37,7 +38,10 @@ def restore(backup_path):
        print(code)
 
 if DBXTOKEN:
-   dbx = dropbox.Dropbox(DBXTOKEN)
+   if APP_KEY:
+      dbx = dropbox.Dropbox(oauth2_refresh_token=DBXTOKEN, app_key=APP_KEY)
+   else:
+      dbx = dropbox.Dropbox(DBXTOKEN)
    # Check that the access token is valid
    try:
       dbx.users_get_current_account()
