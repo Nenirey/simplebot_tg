@@ -628,6 +628,8 @@ def link_to(bot, payload, replies, message):
     if payload:
        tchat = payload.replace('@','')
        bot.set(str(message.chat.id), tchat)
+       if DBXTOKEN:
+          backup_db()
        replies.add(text='Se ha asociado el chat de Telegram '+payload+' con este chat')
     else:
        replies.add(text='Debe proporcionar una id de chat de Telegram, ejemplo: @deltachat2')
