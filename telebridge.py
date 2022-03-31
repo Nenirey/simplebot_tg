@@ -327,6 +327,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     global UPDATE_DELAY
     global white_list
     global black_list
+    global unreaddb
     MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
     MAX_MSG_LOAD = int(MAX_MSG_LOAD)
     MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
@@ -352,6 +353,7 @@ def deltabot_init(bot: DeltaBot) -> None:
        white_list = white_list.split()
     if black_list:
        black_list = black_list.split()
+    unreaddb = json.loads(bot.get('UNREADDB') or '{}')
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -407,6 +409,7 @@ def deltabot_start(bot: DeltaBot) -> None:
     fixautochatsdb(bot)
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
+
 
 def get_dbxtoken(bot, replies, message, payload):
     "Get fresh Dropbox Token (DBXTOKEN)"
@@ -1124,6 +1127,7 @@ def async_login_session(payload, replies, message):
        async_load_delta_chats(message = message, replies = replies)
 
 async def updater(bot, payload, replies, message):
+    global DBXTOKEN
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
        return
@@ -1184,7 +1188,7 @@ async def updater(bot, payload, replies, message):
                  replies.add(text = "Estas al día con "+ttitle+" id:[`"+str(d.id)+"`]\n/more", chat = chat_id)
               else:
                  replies.add(text = "Tienes "+str(d.unread_count)+" mensajes sin leer de "+ttitle+" id:[`"+str(d.id)+"`]\n/more", chat = chat_id)
-              bot.set(str(chat_id),str(d.id))
+              bot.set(str(chat_id.id),str(d.id))
               if chats_limit<=0:
                  break
            else:
@@ -1302,6 +1306,7 @@ def async_react_button(bot, message, replies, payload):
 
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
+    global DBXTOKEN
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
     dchat = chat_id.get_name()
@@ -1712,6 +1717,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
           if m_id>-1 and dc_msg>-1:
              unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
+             bot.set('UNREADDB',json.dumps(unreaddb))
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
@@ -1719,7 +1725,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
        if DBXTOKEN:
-          if dchat!=str(ttitle):
+          if dchat!=str(ttitle) and len(chat_id.get_contacts())<3:
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
        await client.disconnect()
@@ -2076,6 +2082,7 @@ def async_join_chats(bot, message, replies, payload):
        async_save_delta_chats(replies = replies, message = message)
 
 async def preview_chats(bot, payload, replies, message):
+    global DBXTOKEN
     try:
         if message.get_sender_contact().addr not in logindb:
            replies.add(text = 'Debe iniciar sesión para visualizar chats!')
@@ -2163,7 +2170,7 @@ async def preview_chats(bot, payload, replies, message):
            chatdb[message.get_sender_contact().addr][str(uid)] = str(chat_id.get_name())
            replies.add(text = 'Se ha creado una vista previa del chat '+str(ttitle))
            replies.add(text = "Cargar más mensajes\n/more_-0", chat = chat_id)
-           bot.set(str(chat_id),str(uid))
+           bot.set(str(chat_id.id),str(uid))
         await client.disconnect()
     except:
         code = str(sys.exc_info())
@@ -2192,8 +2199,9 @@ def confirm_unread(bot: DeltaBot, chat_id):
        par_key = str(chat_id)+':'+str(chat_messages[-1].id)
        if par_key in unreaddb:
           print('Confirmando lectura de mensaje '+par_key)
-          async_read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2])
+          tloop.create_task(read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2]))
           del unreaddb[par_key]
+          bot.set('UNREADDB',json.dumps(unreaddb))
        return True
     else:
        return False
