@@ -35,7 +35,7 @@
       "description": "Get this value from https://www.dropbox.com/developers/apps/create",
       "required": false,
       "value": ""
-    }
+    },
     "APP_KEY": {
       "description": "Get this value from https://www.dropbox.com/developers/apps/create",
       "required": false,
