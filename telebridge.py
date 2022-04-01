@@ -2199,7 +2199,7 @@ def confirm_unread(bot: DeltaBot, chat_id):
        par_key = str(chat_id)+':'+str(chat_messages[-1].id)
        if par_key in unreaddb:
           print('Confirmando lectura de mensaje '+par_key)
-          tloop.create_task(read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2]))
+          loop.run_until_complete(read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2]))
           del unreaddb[par_key]
           bot.set('UNREADDB',json.dumps(unreaddb))
        return True
