@@ -2196,12 +2196,6 @@ def confirm_unread(bot: DeltaBot, chat_id):
     if len(chat_messages)<1:
        return True
     elif chat_messages[-1].get_message_info().find('\nState: Read')>0 or chat_messages[-1].get_message_info().find('\nState: Seen')>0 or chat_messages[-1].get_message_info().find('\nRead: ')>0:
-       par_key = str(chat_id)+':'+str(chat_messages[-1].id)
-       if par_key in unreaddb:
-          print('Confirmando lectura de mensaje '+par_key)
-          async_read_unread(unreaddb[par_key][0],unreaddb[par_key][1],unreaddb[par_key][2])
-          del unreaddb[par_key]
-          bot.set('UNREADDB',json.dumps(unreaddb))
        return True
     else:
        return False
@@ -2217,8 +2211,15 @@ async def auto_load(bot, message, replies):
                for (inkey, invalue) in value.items():
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
-                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1 or confirm_unread(bot, int(inkey)):
+                      if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
                          await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                      elif confirm_unread(bot, int(inkey)):
+                         for key, _ in unreaddb.items():
+                             if key.startswith(str(inkey)+':'):
+                                print('Confirmando lectura de mensaje '+key)
+                                await read_unread(unreaddb[key][0],unreaddb[key][1],unreaddb[key][2])
+                                del unreaddb[key]
+                                break
                       else:
                          print('\nChat con mensajes por leer: '+str(inkey))
                    except:
