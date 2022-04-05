@@ -43,7 +43,7 @@ from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
 
-version = "0.2.1"
+version = "0.2.2"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -415,8 +415,12 @@ def get_dbxtoken(bot, replies, message, payload):
     "Get fresh Dropbox Token (DBXTOKEN)"
     global authorize_url
     if APP_KEY:
-       authorize_url = auth_flow.start()
-       replies.add(text='Por favor acceda a la siguiente URI, presione [Allow o Permitir], copie el codigo de autorizacion y envielo aqui:\n\n'+str(authorize_url))
+       try:
+          authorize_url = auth_flow.start()
+          replies.add(text='Por favor acceda a la siguiente URI, presione [Allow o Permitir], copie el codigo de autorizacion y envielo aqui:\n\n'+str(authorize_url))
+       except:
+          code = str(sys.exc_info())
+          replies.add(text=code)
     else:
        replies.add(text='Debe colocar su APP_KEY de Dropbox en las variables de entorno, para poder generar nuevos codigos de acceso.')
 
@@ -1044,7 +1048,7 @@ async def login_code(payload, replies, message):
               del clientdb[message.get_sender_contact().addr]
           except SessionPasswordNeededError:
               smsdb[message.get_sender_contact().addr]=payload
-              replies.add(text = 'Tiene habilitada la autentificacion de doble factor, por favor introdusca /pass PASSWORD para completar el loguin.')
+              replies.add(text = 'Tiene habilitada la autentificacion de doble factor, por favor introdusca /pass PASSWORD para completar el login.')
        else:
           replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
     except Exception as e:
@@ -1525,6 +1529,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     mservice += '_Se creo el grupo/canal_\n'
                  elif isinstance(m.action, types.MessageActionPhoneCall):
                     mservice += '_📞Llamada_\n'
+                 elif isinstance(m.action, types.MessageActionChatEditPhoto):
+                    mservice += '_Foto del grupo/canal cambiada_\n'
+                    try:
+                       profile_photo = await client.download_profile_photo(target, contacto)
+                       chat_id.set_profile_image(profile_photo)
+                    except:
+                       print('Error actualizando photo de perfil')
 
               #extract sender name
               if hasattr(m,'sender') and m.sender and hasattr(m.sender,'first_name') and m.sender.first_name:
@@ -1556,7 +1567,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_aiouploaderbot"
+              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_karurosagu_mail_bot"
 
               #check if message is a poll
               if m.poll:
@@ -1863,6 +1874,8 @@ async def send_cmd(bot, message, replies, payload):
        await client.connect()
        await client.get_dialogs()
        t_reply = None
+       m = None
+       tinfo = ''
        if message.quote:
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
        if message.filename:
@@ -1871,8 +1884,37 @@ async def send_cmd(bot, message, replies, payload):
           else:
              m = await client.send_file(target, message.filename, caption = payload, reply_to=t_reply)
        else:
-          m = await client.send_message(target,payload, reply_to=t_reply)
-       register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+          if payload:
+             m = await client.send_message(target,payload, reply_to=t_reply)
+          else:
+             pchat = await client.get_input_entity(target)
+             if isinstance(pchat, types.InputPeerChannel):
+                full_pchat = await client(functions.channels.GetFullChannelRequest(channel = pchat))
+                if hasattr(full_pchat.full_chat,'bot_info') and full_pchat.full_chat.bot_info and len(full_pchat.full_chat.bot_info)>0:
+                   print('Obteniando commandos de grupo/canal...')
+                   tinfo += "\n"+str(full_pchat.full_chat.bot_info.description)+"\n\n"
+                   for binfo in full_pchat.full_chat.bot_info:
+                       if hasattr(binfo,'commands') and binfo.commands:
+                          for cmd in binfo.commands:
+                              tinfo += "\n/b_/"+str(cmd.command)+" "+str(cmd.description)
+             elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
+                  full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
+                  if hasattr(full_pchat.full_user,'bot_info') and full_pchat.full_user.bot_info:
+                     print('Obteniando commandos de usuario/bot...')
+                     if hasattr(full_pchat.full_user.bot_info,'commands') and full_pchat.full_user.bot_info.commands:
+                        for cmd in full_pchat.full_user.bot_info.commands:
+                            tinfo += "\n/b_/"+str(cmd.command)+" "+str(cmd.description)
+             elif isinstance(pchat, types.InputPeerChat):
+                  print('Hemos encontrado un InputPeerChat: '+str(f_id))
+                  full_pchat = await client(functions.messages.GetFullChatRequest(chat_id=pchat.id))
+                  if hasattr(full_pchat.full_chat,'bot_info') and full_pchat.full_chat.bot_info and len(full_pchat.full_chat.bot_info)>0:
+                     print('Obteniando commandos de chat...')
+                     if hasattr(full_pchat.full_chat.bot_info[0],'commands') and full_pchat.full_chat.bot_info[0].commands:
+                        for cmd in full_pchat.full_chat.bot_info[0].commands:
+                            tinfo += "\n/b_/"+str(cmd.command)+" "+str(cmd.description)
+             replies.add(text=tinfo)
+       if m:
+          register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, payload))
@@ -2212,7 +2254,8 @@ async def auto_load(bot, message, replies):
                    #print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
                       if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
-                         await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
+                         if key in logindb:
+                            await load_chat_messages(bot = bot, replies = Replies, message = message, payload='', dc_contact = key, dc_id = inkey, is_auto=True)
                       elif confirm_unread(bot, int(inkey)):
                          for key, _ in unreaddb.items():
                              if key.startswith(str(inkey)+':'):
