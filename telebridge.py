@@ -80,6 +80,10 @@ autochatsdb = {}
 global chatdb
 chatdb = {}
 
+global resultsdb
+#{contact_addr:results}
+resultsdb = {}
+
 global auto_load_task
 auto_load_task = None
 
@@ -105,9 +109,11 @@ LOGINFILE = ''
 global AUTOCHATFILE
 AUTOCHATFILE = ''
 
+if APP_KEY:
+   auth_flow = DropboxOAuth2FlowNoRedirect(APP_KEY, use_pkce=True, token_access_type='offline')
+
 if DBXTOKEN:
    if APP_KEY:
-      auth_flow = DropboxOAuth2FlowNoRedirect(APP_KEY, use_pkce=True, token_access_type='offline')
       dbx = dropbox.Dropbox(oauth2_refresh_token=DBXTOKEN, app_key=APP_KEY)
    else:
       dbx = dropbox.Dropbox(DBXTOKEN)
@@ -375,6 +381,8 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/preview" ,func = async_preview_chats)
     bot.commands.register(name = "/auto" ,func = async_add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
+    bot.commands.register(name = "/inmore" ,func = async_inline_cmd)
+    bot.commands.register(name = "/inclick" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
     bot.commands.register(name = "/forward" ,func = async_forward_message)
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
@@ -1875,7 +1883,7 @@ async def send_cmd(bot, message, replies, payload):
        await client.get_dialogs()
        t_reply = None
        m = None
-       tinfo = ''
+       tinfo = 'Comandos disponibles:'
        if message.quote:
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
        if message.filename:
@@ -1890,10 +1898,10 @@ async def send_cmd(bot, message, replies, payload):
              pchat = await client.get_input_entity(target)
              if isinstance(pchat, types.InputPeerChannel):
                 full_pchat = await client(functions.channels.GetFullChannelRequest(channel = pchat))
-                if hasattr(full_pchat.full_chat,'bot_info') and full_pchat.full_chat.bot_info and len(full_pchat.full_chat.bot_info)>0:
+                if hasattr(full_pchat.full_chat,'bot_info') and full_pchat.full_chat.bot_info:
                    print('Obteniando commandos de grupo/canal...')
-                   tinfo += "\n"+str(full_pchat.full_chat.bot_info.description)+"\n\n"
                    for binfo in full_pchat.full_chat.bot_info:
+                       tinfo += "\n"+str(binfo.description)+"\n\n"
                        if hasattr(binfo,'commands') and binfo.commands:
                           for cmd in binfo.commands:
                               tinfo += "\n/b_/"+str(cmd.command)+" "+str(cmd.description)
@@ -1938,13 +1946,16 @@ async def inline_cmd(bot, message, replies, payload):
     /inline_sticker para buscar sticker con emojis
     /inline_ribot para buscar en Google
     """
+    is_down = message.text.lower().startswith('/indown')
+    is_more = message.text.lower().startswith('/inmore')
+    is_click = message.text.lower().startswith('/inclick')
     contacto = message.get_sender_contact().addr
     if not os.path.exists(contacto):
        os.mkdir(contacto)
     if contacto not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
-    if len(payload.split())>1:
+    if len(payload.split())>1 or is_more or is_click:
        parametros = payload.split()
        inline_bot = parametros[0]
        inline_search = payload.replace(parametros[0],'',1)
@@ -1956,19 +1967,35 @@ async def inline_cmd(bot, message, replies, payload):
        client = TC(StringSession(logindb[contacto]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
-       if target:
-          results = await client.inline_query(bot = inline_bot, query = inline_search, entity = target)
+       offset = 0
+       if is_click:
+          if contacto in resultsdb:
+             results = []
+             await resultsdb[contacto][int(parametros[0])].click()
+             #await client(functions.messages.SendInlineBotResultRequest(peer=target, query_id=resultsdb[contacto][int(parametros[0])].query_id, id=resultsdb[contacto][int(parametros[0])].result.id))
+       elif is_more:
+          offset = int(parametros[0])
+          if contacto in resultsdb:
+             results = resultsdb[contacto][offset::]
+          else:
+             replies.add('Debe realizar la consulta para poder cargar mas')
+             return
        else:
-          results = await client.inline_query(bot = inline_bot, query = inline_search)
+          if target:
+             results = await client.inline_query(bot = inline_bot, query = inline_search, entity = target)
+          else:
+             results = await client.inline_query(bot = inline_bot, query = inline_search)
+          resultsdb[contacto] = results
 
        limite = 0
-       if len(results)<1:
+       if len(results)<1 and not is_click and not is_more:
           replies.add('La busqueda no arrojó ningun resultado.')
           await client.disconnect()
           return
        for r in results:
            attach = ''
            resultado = ''
+           html_buttons = ''
            tipo = None
            if limite<10:
               if hasattr(r,'title') and r.title:
@@ -1977,6 +2004,25 @@ async def inline_cmd(bot, message, replies, payload):
                  resultado+=str(r.description)+'\n'
               if hasattr(r,'url') and r.url:
                  resultado+=str(r.url)+'\n'
+              if hasattr(r.result,'send_message') and r.result.send_message:
+                 if hasattr(r.result.send_message,'message') and r.result.send_message.message:
+                    #resultado+=str(r.result.send_message.message)+'\n'
+                    #check if message have buttons
+                    if hasattr(r.result.send_message,'reply_markup') and r.result.send_message.reply_markup and hasattr(r.result.send_message.reply_markup,'rows'):
+                       nrow = 0
+                       html_buttons = '\n\n---\n'
+                       for row in r.result.send_message.reply_markup.rows:
+                           html_buttons += '\n'
+                           ncolumn = 0
+                           for b in row.buttons:
+                               if hasattr(b,'url') and b.url:
+                                  html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
+                               else:
+                                  html_buttons += '['+str(b.text)+'] '
+                               ncolumn += 1
+                           html_buttons += '\n'
+                           nrow += 1
+                    replies.add(text = resultado+html_buttons+'\n\n/inclick_'+str(limite+offset))
               if hasattr(r,'message') and r.message:
                  if r.message.message:
                     resultado+=str(r.message.message)+'\n'
@@ -1984,7 +2030,6 @@ async def inline_cmd(bot, message, replies, payload):
                     for e in r.message.entities:
                         if hasattr(e,'url') and e.url:
                            resultado+=str(e.url)+'\n'
-
               if attach == '':
                  try:
                     if hasattr(r,'document') and r.document:
@@ -2036,7 +2081,10 @@ async def inline_cmd(bot, message, replies, payload):
                     print('Error descargando inline audio result')
               limite +=1
            else:
+              replies.add(text='Cargar mas resultados:\n/inmore_'+str(limite+offset))
               break
+       if limite<10:
+          replies.add(text='Fin de la consulta.')
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -2263,6 +2311,9 @@ async def auto_load(bot, message, replies):
                                 await read_unread(unreaddb[key][0],unreaddb[key][1],unreaddb[key][2])
                                 del unreaddb[key]
                                 break
+                      elif len(bot.get_chat(int(inkey)).get_contacts())<3 and bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('rejected: Mailbox is full')>0:
+                         print('Bandeja llena...')
+                         del unreaddb[key]
                       else:
                          print('\nChat con mensajes por leer: '+str(inkey))
                    except:
