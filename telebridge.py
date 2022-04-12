@@ -1560,6 +1560,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               else:
                  send_by = ""
 
+              #check if send via bot
+              if hasattr(m,'via_bot_id') and m.via_bot_id:
+                 full_bot = await client(functions.users.GetFullUserRequest(id = m.via_bot_id))
+                 if CAN_IMP:
+                    send_by += " via @"+full_bot.users[0].username
+                 else:
+                    send_by = send_by.replace(':\n',' ')
+                    send_by += "via @"+full_bot.users[0].username+":\n"
+
               #check if message have buttons
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
                  nrow = 0
@@ -1964,14 +1973,21 @@ async def inline_cmd(bot, message, replies, payload):
        return
     target = get_tg_id(message.chat, bot)
     try:
-       client = TC(StringSession(logindb[contacto]), api_id, api_hash)
-       await client.connect()
-       await client.get_dialogs()
+       if contacto not in clientdb:
+          clientdb[contacto] = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       #client = TC(StringSession(logindb[contacto]), api_id, api_hash)
+       await clientdb[contacto].connect()
+       await clientdb[contacto].get_dialogs()
        offset = 0
        if is_click:
           if contacto in resultsdb:
              results = []
-             await resultsdb[contacto][int(parametros[0])].click()
+             mensa = await resultsdb[contacto][int(parametros[0])].click()
+             await load_chat_messages(bot = bot, message=message, replies=replies, payload=str(mensa.id), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False)
+             return
+          else:
+             replies.add('Debe realizar la consulta para poderla enviar')
+             return
              #await client(functions.messages.SendInlineBotResultRequest(peer=target, query_id=resultsdb[contacto][int(parametros[0])].query_id, id=resultsdb[contacto][int(parametros[0])].result.id))
        elif is_more:
           offset = int(parametros[0])
@@ -1982,22 +1998,22 @@ async def inline_cmd(bot, message, replies, payload):
              return
        else:
           if target:
-             results = await client.inline_query(bot = inline_bot, query = inline_search, entity = target)
+             results = await clientdb[contacto].inline_query(bot = inline_bot, query = inline_search, entity = target)
           else:
-             results = await client.inline_query(bot = inline_bot, query = inline_search)
+             results = await clientdb[contacto].inline_query(bot = inline_bot, query = inline_search)
           resultsdb[contacto] = results
 
        limite = 0
        if len(results)<1 and not is_click and not is_more:
           replies.add('La busqueda no arrojó ningun resultado.')
-          await client.disconnect()
+          #await client.disconnect()
           return
        for r in results:
            attach = ''
            resultado = ''
            html_buttons = ''
            tipo = None
-           if limite<10:
+           if limite<MAX_MSG_LOAD:
               if hasattr(r,'title') and r.title:
                  resultado+=str(r.title)+'\n'
               if hasattr(r,'description') and r.description:
@@ -2033,7 +2049,7 @@ async def inline_cmd(bot, message, replies, payload):
               if attach == '':
                  try:
                     if hasattr(r,'document') and r.document:
-                       attach = await client.download_media(r.document, contacto)
+                       attach = await clientdb[contacto].download_media(r.document, contacto)
                        try:
                           if attach.lower().endswith('.webp') or attach.lower().endswith('.tgs'):
                              tipo = 'sticker'
@@ -2051,46 +2067,47 @@ async def inline_cmd(bot, message, replies, payload):
                     print('Error descargando inline document result')
                  try:
                     if hasattr(r,'photo') and r.photo:
-                       attach = await client.download_media(r.photo, contacto)
+                       attach = await clientdb[contacto].download_media(r.photo, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline photo result')
                  try:
                     if hasattr(r,'gif') and r.gif:
-                       attach = await client.download_media(r.gif, contacto)
+                       attach = await clientdb[contacto].download_media(r.gif, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline gif result')
                  try:
                     if hasattr(r,'video') and r.video:
-                       attach = await client.download_media(r.video, contacto)
+                       attach = await clientdb[contacto].download_media(r.video, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline video result')
                  try:
                     if hasattr(r,'mpeg4_gif') and r.mpeg4_gif:
-                       attach = await client.download_media(r.mpeg4_gif, contacto)
+                       attach = await clientdb[contacto].download_media(r.mpeg4_gif, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline mpeg4_gif result')
                  try:
                     if hasattr(r,'audio') and r.audio:
-                       attach = await client.download_media(r.audio, contacto)
+                       attach = await clientdb[contacto].download_media(r.audio, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline audio result')
               limite +=1
            else:
-              replies.add(text='Cargar mas resultados:\n/inmore_'+str(limite+offset))
               break
-       if limite<10:
+       if limite+offset<len(resultsdb[contacto]):
+          replies.add(text='Cargar mas resultados '+str(limite+offset)+' de '+str(len(resultsdb[contacto]))+':\n/inmore_'+str(limite+offset))
+       else:
           replies.add(text='Fin de la consulta.')
-       await client.disconnect()
+       #await client.disconnect()
     except:
        code = str(sys.exc_info())
        if bot.is_admin(contacto):
          replies.add(text=code)
-       await client.disconnect()
+       #await client.disconnect()
 
 def async_inline_cmd(bot, message, replies, payload):
     """Search command for inline telegram bots. Example /inline gif dogs"""
@@ -2351,7 +2368,7 @@ def stop_updater(bot: DeltaBot, payload, replies, message: Message):
     else:
        replies.add(text='Las autodescargas no fueron iniciadas!')
 
-async def c_run(payload, replies, message):
+async def c_run(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ejecutar comandos!')
        return
@@ -2370,9 +2387,9 @@ async def c_run(payload, replies, message):
        if replies:
           replies.add(text=code or "echo")
 
-def async_run(payload, replies, message):
+def async_run(bot, payload, replies, message):
     """Run command inside a async TelegramClient def. Note that all code run with await prefix, results are maybe a coorutine. Example: /exec client.get_me()"""
-    loop.run_until_complete(c_run(payload, replies, message))
+    loop.run_until_complete(c_run(bot, payload, replies, message))
 
 def bot_settings(bot: DeltaBot, payload, replies, message: Message):
     """Set or show bot settings like:
