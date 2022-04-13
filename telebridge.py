@@ -1394,9 +1394,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        m_id = -1
        dc_msg = -1
        for m in all_messages:
-           if hasattr(m,'from_id') and m.from_id:
-              if hasattr(m.from_id,'user_id') and m.from_id.user_id:
-                 if my_id == m.from_id.user_id:
+           if hasattr(m,'peer_id') and m.peer_id:
+              if hasattr(m.peer_id,'user_id') and m.peer_id.user_id:
+                 if my_id == m.peer_id.user_id:
                     ttitle = "Mensajes guardados"
                     if is_auto:
                        continue
@@ -1575,7 +1575,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'via_bot_id') and m.via_bot_id:
                  full_bot = await client(functions.users.GetFullUserRequest(id = m.via_bot_id))
                  if CAN_IMP:
-                    send_by += " via @"+full_bot.users[0].username
+                    send_by += " via @"+full_bot.users[0].username+"\n"
                  else:
                     send_by = send_by.replace(':\n',' ')
                     send_by += "via @"+full_bot.users[0].username+":\n"
