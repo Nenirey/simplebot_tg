@@ -43,7 +43,7 @@ from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
 
-version = "0.2.2"
+version = "0.2.3"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -383,6 +383,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
     bot.commands.register(name = "/inmore" ,func = async_inline_cmd)
     bot.commands.register(name = "/inclick" ,func = async_inline_cmd)
+    bot.commands.register(name = "/indown" ,func = async_inline_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
     bot.commands.register(name = "/forward" ,func = async_forward_message)
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
@@ -998,6 +999,8 @@ def logout_tg(payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
+       if message.get_sender_contact().addr in clientdb:
+          del clientdb[message.get_sender_contact().addr]
        if message.get_sender_contact().addr in autochatsdb:
           autochatsdb[message.get_sender_contact().addr].clear()
        savelogin()
@@ -1964,9 +1967,9 @@ async def inline_cmd(bot, message, replies, payload):
     if contacto not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
-    if len(payload.split())>1 or is_more or is_click:
+    if len(payload.split())>1 or is_more or is_click or is_down:
        parametros = payload.split()
-       inline_bot = parametros[0]
+       inline_bot = parametros[0].replace('@','')
        inline_search = payload.replace(parametros[0],'',1)
     else:
        replies.add(text = 'Debe proporcionar el nombre del bot y el termino de búsqueda, ejemplo: /inline gif gaticos\nAqui hay otros ejemplos probados:\n'+example_inline)
@@ -1995,6 +1998,14 @@ async def inline_cmd(bot, message, replies, payload):
              results = resultsdb[contacto][offset::]
           else:
              replies.add('Debe realizar la consulta para poder cargar mas')
+             return
+       elif is_down:
+          offset = int(parametros[0])
+          if contacto in resultsdb:
+             results = []
+             results.append(resultsdb[contacto][offset])
+          else:
+             replies.add('Debe realizar la consulta para poder descargar')
              return
        else:
           if target:
@@ -2049,7 +2060,17 @@ async def inline_cmd(bot, message, replies, payload):
               if attach == '':
                  try:
                     if hasattr(r,'document') and r.document:
-                       attach = await clientdb[contacto].download_media(r.document, contacto)
+                       print('Descargando documento...')
+                       if r.document.size<MIN_SIZE_DOWN or (is_down and r.document.size<MAX_SIZE_DOWN):
+                          attach = await clientdb[contacto].download_media(r.document, contacto)
+                       else:
+                          if hasattr(r.document,'attributes') and r.document.attributes:
+                             for attr in r.document.attributes:
+                                 if hasattr(attr,'file_name') and attr.file_name:
+                                    resultado += attr.file_name
+                                 elif hasattr(attr,'title') and attr.title:
+                                    resultado += attr.title
+                          resultado += " "+str(sizeof_fmt(r.document.size))+"\n\n⬇ /indown_"+str(limite+offset)
                        try:
                           if attach.lower().endswith('.webp') or attach.lower().endswith('.tgs'):
                              tipo = 'sticker'
@@ -2067,30 +2088,44 @@ async def inline_cmd(bot, message, replies, payload):
                     print('Error descargando inline document result')
                  try:
                     if hasattr(r,'photo') and r.photo:
-                       attach = await clientdb[contacto].download_media(r.photo, contacto)
+                       print('Descargando photo...')
+                       f_size = 0
+                       if hasattr(r.photo,'sizes') and r.photo.sizes and len(r.photo.sizes)>0:
+                          for sz in r.photo.sizes:
+                              if hasattr(sz,'size') and sz.size:
+                                 f_size = sz.size
+                                 break
+                       if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
+                          attach = await clientdb[contacto].download_media(r.photo, contacto)
+                       else:
+                          resultado += "Foto de "+str(sizeof_fmt(f_size))+"\n\n⬇ /indown_"+str(limite+offset)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline photo result')
                  try:
                     if hasattr(r,'gif') and r.gif:
+                       print('Descargando gif...')
                        attach = await clientdb[contacto].download_media(r.gif, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline gif result')
                  try:
                     if hasattr(r,'video') and r.video:
+                       print('Descargando video...')
                        attach = await clientdb[contacto].download_media(r.video, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline video result')
                  try:
                     if hasattr(r,'mpeg4_gif') and r.mpeg4_gif:
+                       print('Descargando mpeg4_gif...')
                        attach = await clientdb[contacto].download_media(r.mpeg4_gif, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
                     print('Error descargando inline mpeg4_gif result')
                  try:
                     if hasattr(r,'audio') and r.audio:
+                       print('Descargando audio...')
                        attach = await clientdb[contacto].download_media(r.audio, contacto)
                        replies.add(text = resultado, filename=attach, viewtype=tipo)
                  except:
@@ -2098,10 +2133,11 @@ async def inline_cmd(bot, message, replies, payload):
               limite +=1
            else:
               break
-       if limite+offset<len(resultsdb[contacto]):
-          replies.add(text='Cargar mas resultados '+str(limite+offset)+' de '+str(len(resultsdb[contacto]))+':\n/inmore_'+str(limite+offset))
-       else:
-          replies.add(text='Fin de la consulta.')
+       if not is_down:
+          if limite+offset<len(resultsdb[contacto]):
+             replies.add(text='Cargar mas resultados '+str(limite+offset)+' de '+str(len(resultsdb[contacto]))+':\n/inmore_'+str(limite+offset))
+          else:
+             replies.add(text='Fin de la consulta.')
        #await client.disconnect()
     except:
        code = str(sys.exc_info())
