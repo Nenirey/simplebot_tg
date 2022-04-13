@@ -1354,6 +1354,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        await client.get_dialogs()
        tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
        ttitle = 'Unknown'
+       me = await client.get_me()
+       my_id = me.id
        #extract chat title
        if hasattr(tchat,'chats') and tchat.chats:
           ttitle = tchat.chats[0].title
@@ -1392,6 +1394,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        m_id = -1
        dc_msg = -1
        for m in all_messages:
+           if hasattr(m,'from_id') and m.from_id:
+              if hasattr(m.from_id,'user_id') and m.from_id.user_id:
+                 if my_id == m.from_id.user_id:
+                    ttitle = "Mensajes guardados"
+                    if is_auto:
+                       continue
            if m and limite<max_limit:
               mquote = ''
               quote = None
