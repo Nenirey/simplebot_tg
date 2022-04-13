@@ -1575,10 +1575,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'via_bot_id') and m.via_bot_id:
                  full_bot = await client(functions.users.GetFullUserRequest(id = m.via_bot_id))
                  if CAN_IMP:
-                    send_by += " via @"+full_bot.users[0].username+"\n"
+                    sender_name += " via @"+full_bot.users[0].username
                  else:
-                    send_by = send_by.replace(':\n',' ')
-                    send_by += "via @"+full_bot.users[0].username+":\n"
+                    sender_name = sender_name.replace(':\n',' ')
+                    sender_name += "via @"+full_bot.users[0].username+":\n"
 
               #check if message have buttons
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
