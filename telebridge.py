@@ -43,7 +43,7 @@ from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
 
-version = "0.2.3"
+version = "0.2.4"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -381,9 +381,9 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/preview" ,func = async_preview_chats)
     bot.commands.register(name = "/auto" ,func = async_add_auto_chats)
     bot.commands.register(name = "/inline" ,func = async_inline_cmd)
-    bot.commands.register(name = "/inmore" ,func = async_inline_cmd)
-    bot.commands.register(name = "/inclick" ,func = async_inline_cmd)
-    bot.commands.register(name = "/indown" ,func = async_inline_cmd)
+    bot.commands.register(name = "/inmore" ,func = async_inmore_cmd)
+    bot.commands.register(name = "/inclick" ,func = async_inclick_cmd)
+    bot.commands.register(name = "/indown" ,func = async_indown_cmd)
     bot.commands.register(name = "/list" ,func = list_chats)
     bot.commands.register(name = "/forward" ,func = async_forward_message)
     bot.commands.register(name = "/pin" ,func = async_pin_messages)
@@ -1468,25 +1468,28 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if m.fwd_from:
                  fwd_text = 'Mensaje reenviado\n'
                  if m.fwd_from.from_id:
-                    if isinstance(m.fwd_from.from_id, types.PeerUser):
-                       full = await client(GetFullUserRequest(m.fwd_from.from_id))
-                       if full.users[0].first_name:
-                          fwd_first = str(full.users[0].first_name)
-                       else:
-                          fwd_first = ""
-                       if full.users[0].last_name:
-                          fwd_last = str(full.users[0].last_name)
-                       else:
-                          fwd_last = ""
-                       fwd_text += "De: "+str(fwd_first+' '+fwd_last).strip()+"\n\n"
-                    elif isinstance(m.fwd_from.from_id, types.PeerChannel):
-                       full = await client(functions.channels.GetFullChannelRequest(channel = m.fwd_from.from_id))
-                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
-                          fwd_text += "De: "+str(full.chats[0].title)+"\n\n"
-                    elif isinstance(m.fwd_from.from_id, types.PeerChat):
-                       full = await client(functions.messages.GetFullChatRequest(chat_id = m.fwd_from.from_id))
-                       if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
-                          fwd_text += "De chat:"+full.chats[0].title+"\n"
+                    try:
+                       if isinstance(m.fwd_from.from_id, types.PeerUser):
+                          full = await client(GetFullUserRequest(m.fwd_from.from_id))
+                          if full.users[0].first_name:
+                             fwd_first = str(full.users[0].first_name)
+                          else:
+                             fwd_first = ""
+                          if full.users[0].last_name:
+                             fwd_last = str(full.users[0].last_name)
+                          else:
+                             fwd_last = ""
+                          fwd_text += "De: "+str(fwd_first+' '+fwd_last).strip()+"\n\n"
+                       elif isinstance(m.fwd_from.from_id, types.PeerChannel):
+                          full = await client(functions.channels.GetFullChannelRequest(channel = m.fwd_from.from_id))
+                          if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                             fwd_text += "De: "+str(full.chats[0].title)+"\n\n"
+                       elif isinstance(m.fwd_from.from_id, types.PeerChat):
+                          full = await client(functions.messages.GetFullChatRequest(chat_id = m.fwd_from.from_id))
+                          if hasattr(full,'chats') and full.chats and hasattr(full.chats[0],'title'):
+                             fwd_text += "De chat:"+full.chats[0].title+"\n"
+                    except:
+                       fwd_text += "De: ?????\n"
 
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
@@ -2157,6 +2160,18 @@ def async_inline_cmd(bot, message, replies, payload):
     """Search command for inline telegram bots. Example /inline gif dogs"""
     loop.run_until_complete(inline_cmd(bot, message, replies, payload))
 
+def async_inmore_cmd(bot, message, replies, payload):
+    """Load more results from last inline telegram bot request. Example /inmore 5"""
+    loop.run_until_complete(inline_cmd(bot, message, replies, payload))
+
+def async_indown_cmd(bot, message, replies, payload):
+    """Download result from inline telegram bot request. Example /indown 5"""
+    loop.run_until_complete(inline_cmd(bot, message, replies, payload))
+
+def async_inclick_cmd(bot, message, replies, payload):
+    """Execute action click result from inline telegram bot request, this normaly
+    send the result to the current chat. Example /inclick 5"""
+    loop.run_until_complete(inline_cmd(bot, message, replies, payload))
 
 async def search_chats(bot, message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
