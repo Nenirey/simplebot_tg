@@ -260,6 +260,26 @@ def fixautochatsdb(bot):
                del autochatsdb[key][inkey]
 
 
+def extract_text_block(block):
+    text_block = ""
+    if hasattr(block,'text') and block.text:
+       if isinstance(block.text,types.TextBold):
+          text_block += "<b>"+extract_text_block(block.text.text)+"</b>"
+       elif isinstance(block.text,types.TextItalic):
+          text_block += "<i>"+extract_text_block(block.text.text)+"</i>"
+       elif isinstance(block.text,types.TextPlain):
+          text_block += extract_text_block(block.text)
+       elif isinstance(block.text,types.TextUrl):
+          text_block += extract_text_block(block.text)
+       elif isinstance(block.text,types.TextConcat):
+          for tc in block.text.texts:
+              text_block += extract_text_block(tc)
+       elif isinstance(block.text,types.TextEmpty):
+          text_block += ""
+       else:
+          text_block += str(block.text)
+    return text_block
+
 class AccountPlugin:
       #def __init__(self, bot:DeltaBot) -> None:
       #    self.bot = bot
@@ -716,8 +736,8 @@ async def chat_info(bot, payload, replies, message):
              full_pchat = await client(functions.channels.GetFullChannelRequest(channel = pchat))
              if hasattr(full_pchat,'chats') and full_pchat.chats and len(full_pchat.chats)>0:
                 tinfo += "\nTitulo: "+full_pchat.chats[0].title
-                if hasattr(full_pchat.chats[0],'participants_count') and full_pchat.chats[0].participants_count:
-                   tinfo += "\nParticipantes: "+str(full_pchat.chats[0].participants_count)
+                if hasattr(full_pchat.full_chat,'participants_count') and full_pchat.full_chat.participants_count:
+                   tinfo += "\nParticipantes: "+str(full_pchat.full_chat.participants_count)
           elif isinstance(pchat, types.InputPeerUser) or isinstance(pchat, types.InputPeerSelf):
                full_pchat = await client(functions.users.GetFullUserRequest(id = pchat))
                if hasattr(full_pchat,'users') and full_pchat.users:
@@ -1434,11 +1454,103 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                         html_spoiler = text_message
                         text_message = hide_spoiler(m.message, ent.offset, ent.length)
                         break
+
+              #check if message have web preview
+              if hasattr(m,'web_preview') and m.web_preview and hasattr(m.web_preview,'cached_page') and m.web_preview.cached_page:
+                 if hasattr(m.web_preview.cached_page,'blocks') and m.web_preview.cached_page.blocks:
+                    if not html_spoiler:
+                       html_spoiler = ""
+                    for block in m.web_preview.cached_page.blocks:
+                        if isinstance(block, types.PageBlockCover):
+                           if hasattr(block,'cover') and block.cover:
+                              if hasattr(block.cover,'photo_id') and block.cover.photo_id:
+                                 for cached_photo in m.web_preview.cached_page.photos:
+                                     if cached_photo.id == block.cover.photo_id:
+                                        html_spoiler += '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(cached_photo,bytes)).decode(),'COVER')
+                              if hasattr(block.cover,'caption') and block.cover.caption:
+                                 html_spoiler += "<br>"+extract_text_block(block.cover.caption)+""
+                        elif isinstance(block, types.PageBlockTitle):
+                           if hasattr(block,'text') and block.text:
+                              html_spoiler += "<br><br><h1>"+str(block.text.text)+"</h1>"
+                        elif isinstance(block, types.PageBlockSubtitle):
+                           if hasattr(block,'text') and block.text:
+                              html_spoiler += "<br><br><h2>"+str(block.text.text)+"</h2>"
+                        elif isinstance(block, types.PageBlockAuthorDate):
+                           if hasattr(block,'published_date') and block.published_date:
+                              html_spoiler += "<br><br>"+str(block.published_date)
+                           if hasattr(block,'author') and block.author:
+                              html_spoiler += " por "+extract_text_block(block.author)
+                        elif isinstance(block, types.PageBlockPhoto):
+                           if hasattr(block,'photo_id') and block.photo_id:
+                              for cached_photo in m.web_preview.cached_page.photos:
+                                  if cached_photo.id == block.photo_id:
+                                     html_spoiler += '<br><br><center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(cached_photo,bytes)).decode(),'PHOTO')
+                        elif isinstance(block, types.PageBlockSlideshow):
+                           for slide_photo in block.items:
+                               if hasattr(slide_photo,'photo_id') and slide_photo.photo_id:
+                                  for cached_photo in m.web_preview.cached_page.photos:
+                                      if cached_photo.id == slide_photo.photo_id:
+                                         html_spoiler += '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(cached_photo,bytes)).decode(),'SLIDE PHOTO')
+                        elif isinstance(block, types.PageBlockChannel):
+                           if hasattr(block.channel,'photo') and block.channel.photo:
+                              try:
+                                 html_spoiler += '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(block.channel.photo,bytes)).decode(),'PHOTO')
+                              except:
+                                 print("err")
+                           if hasattr(block.channel,'title') and block.channel.title:
+                              html_spoiler += str(block.channel.title)
+                        elif isinstance(block, types.PageBlockParagraph) or isinstance(block, types.PageBlockBlockquote):
+                           html_spoiler += "<br><br>"+extract_text_block(block)
+                        elif isinstance(block, types.PageBlockPullquote):
+                           html_spoiler += "<br><br><center>"+extract_text_block(block)+"</center>"
+                        elif isinstance(block, types.PageBlockHeader):
+                           html_spoiler += "<br><br><h2>"+extract_text_block(block)+"</h2>"
+                        elif isinstance(block, types.PageBlockSubheader):
+                           html_spoiler += "<br><br><h3>"+extract_text_block(block)+"</h3>"
+                        elif isinstance(block, types.PageBlockList) or isinstance(block, types.PageBlockOrderedList):
+                           if isinstance(block, types.PageBlockOrderedList):
+                              start_tag_list = "<ol>"
+                              end_tag_list = "</ol>"
+                           else:
+                              start_tag_list = "<ul>"
+                              end_tag_list = "</ul>"
+                           html_spoiler += "<br><br>"+start_tag_list
+                           for itemlist in block.items:
+                               html_spoiler += "<li>"+extract_text_block(itemlist)+"</li>"
+                           html_spoiler += end_tag_list
+                        elif isinstance(block, types.PageBlockTable):
+                           html_spoiler += "<table border='1'>"
+                           for row in block.rows:
+                               html_spoiler += "<tr>"
+                               for cell in row.cells:
+                                   html_spoiler += "<td>"+extract_text_block(cell)+"</td>"
+                               html_spoiler += "</tr>"
+                           html_spoiler += "</table>"
+                        elif isinstance(block, types.PageBlockEmbedPost):
+                           for post in block.blocks:
+                               html_spoiler += "<br><br>"+extract_text_block(post)
+                        elif isinstance(block, types.PageBlockRelatedArticles):
+                           for article in block.articles:
+                               if hasattr(article,'title') and article.title:
+                                  html_spoiler += "<br><br>"+article.title
+                               if hasattr(article,'description') and article.description:
+                                  html_spoiler += "<br>"+article.description
+                        elif isinstance(block, types.PageBlockEmbed):
+                           if hasattr(block,'url') and block.url:
+                              html_spoiler += "<video controls><source src='"+block.url+"'></video>"
+                        elif isinstance(block, types.PageBlockVideo):
+                           if hasattr(block,'video_id') and block.video_id:
+                              for cached_video in m.web_preview.cached_page.documents:
+                                  if cached_video.id == block.video_id:
+                                     html_spoiler += '<center><video controls><source type="data:video/mp4;base64,{}" alt="{}"></video></center>'.format(base64.b64encode(await client.download_media(cached_video,bytes)).decode(),'VIDEO')
+                        elif isinstance(block, types.PageBlockAnchor):
+                           html_spoiler += ""
+                        else:
+                           html_spoiler += "<br><br>"+str(block)
+
               #check if message has comments
-              #if hasattr(m,'replies') and m.replies and hasattr(m.replies,'comments') and m.replies.comments:
               if hasattr(m,'post') and m.post:
                  try:
-                    #comentarios = await client(functions.messages.GetRepliesRequest(peer=target, msg_id=m.id, offset_id=m.id, offset_date=datetime(2018, 6, 25), add_offset=0, limit=100, max_id=0, min_id=0, hash=0 ))
                     comentarios = await client.get_messages(target, reply_to=m.id, limit = 200)
                  except:
                     comentarios = None
@@ -1463,6 +1575,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                         else:
                            file_comment = (coment.message or '[ARCHIVO/VIDEO]').replace('\n', '<br>')
                         html_spoiler += "<br><div style='border-radius:10px;color:white;background:#7777ff;padding-left:5px;padding-top:5px;padding-right:5px;padding-bottom:5px'><b>"+from_coment+"</b><br>"+file_comment+"</div>"
+
 
               #check if message is a forward
               if m.fwd_from:
@@ -1578,7 +1691,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'via_bot_id') and m.via_bot_id:
                  full_bot = await client(functions.users.GetFullUserRequest(id = m.via_bot_id))
                  if CAN_IMP:
-                    sender_name += " via @"+full_bot.users[0].username
+                    if sender_name:
+                       sender_name += " via @"+str(full_bot.users[0].username)
+                    else:
+                       sender_name = " via @"+str(full_bot.users[0].username)
                  else:
                     sender_name = sender_name.replace(':\n',' ')
                     sender_name += "via @"+full_bot.users[0].username+":\n"
@@ -1771,10 +1887,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
        await client.disconnect()
-    except:
-       code = str(sys.exc_info())
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       print(estr)
        if not is_auto:
-          myreplies.add(text=code, chat = chat_id)
+          myreplies.add(text=estr, chat = chat_id)
           myreplies.send_reply_messages()
 
 
