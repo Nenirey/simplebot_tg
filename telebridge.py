@@ -42,8 +42,10 @@ from dropbox.exceptions import ApiError, AuthError
 from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
+import locale
+locale.setlocale(locale.LC_TIME, '')
 
-version = "0.2.4"
+version = "0.2.5"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -264,11 +266,20 @@ def extract_text_block(block):
     text_block = ""
     if hasattr(block,'text') and block.text:
        if isinstance(block.text,types.TextBold):
-          text_block += "<b>"+extract_text_block(block.text.text)+"</b>"
+          if hasattr(block,'url') and block.url:
+             text_block += "<b><a href='"+block.url+"'>"+extract_text_block(block.text.text)+"</a></b>"
+          else:
+             text_block += "<b>"+extract_text_block(block.text.text)+"</b>"
        elif isinstance(block.text,types.TextItalic):
-          text_block += "<i>"+extract_text_block(block.text.text)+"</i>"
+          if hasattr(block,'url') and block.url:
+             text_block += "<i><a href='"+block.url+"'>"+extract_text_block(block.text.text)+"</a></i>"
+          else:
+             text_block += "<i>"+extract_text_block(block.text.text)+"</i>"
        elif isinstance(block.text,types.TextPlain):
-          text_block += extract_text_block(block.text)
+          if hasattr(block,'url') and block.url:
+             text_block += "<a href='"+block.url+"'>"+extract_text_block(block.text)+"</a>"
+          else:
+             text_block += extract_text_block(block.text)
        elif isinstance(block.text,types.TextUrl):
           text_block += extract_text_block(block.text)
        elif isinstance(block.text,types.TextConcat):
@@ -1414,12 +1425,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        m_id = -1
        dc_msg = -1
        for m in all_messages:
+           #skip self unread message
+           if hasattr(m,'sender') and m.sender:
+              if my_id == m.sender.id:
+                 if is_auto:
+                    continue
            if hasattr(m,'peer_id') and m.peer_id:
               if hasattr(m.peer_id,'user_id') and m.peer_id.user_id:
                  if my_id == m.peer_id.user_id:
                     ttitle = "Mensajes guardados"
-                    if is_auto:
-                       continue
            if m and limite<max_limit:
               mquote = ''
               quote = None
@@ -1437,6 +1451,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               reactions_text = ''
               comment_text = ''
               sender_name = None
+              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_karurosagu_mail_bot"
               if show_id:
                  msg_id = '\n'+str(m.id)
 
@@ -1458,12 +1473,21 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message have web preview
               if hasattr(m,'web_preview') and m.web_preview and hasattr(m.web_preview,'cached_page') and m.web_preview.cached_page:
                  if hasattr(m.web_preview.cached_page,'blocks') and m.web_preview.cached_page.blocks:
+                    last_html = html_spoiler
                     if not html_spoiler:
-                       html_spoiler = ""
+                       html_spoiler = """<style>
+                       body {
+                       font-size: 18px;
+                       color: white;
+                       background-color: black;}
+                       a:link {
+                       color: #aaaaff;}</style>"""
                     for block in m.web_preview.cached_page.blocks:
                         if isinstance(block, types.PageBlockCover):
                            if hasattr(block,'cover') and block.cover:
                               if hasattr(block.cover,'photo_id') and block.cover.photo_id:
+                                 if hasattr(m,'media') and m.media and hasattr(m.media,'webpage') and m.media.webpage and hasattr(m.media.webpage,'photo') and m.media.webpage.photo and m.media.webpage.photo.id == block.cover.photo_id:
+                                    html_spoiler += '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(m.media.webpage.photo,bytes)).decode(),'COVER')
                                  for cached_photo in m.web_preview.cached_page.photos:
                                      if cached_photo.id == block.cover.photo_id:
                                         html_spoiler += '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await client.download_media(cached_photo,bytes)).decode(),'COVER')
@@ -1477,9 +1501,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               html_spoiler += "<br><br><h2>"+str(block.text.text)+"</h2>"
                         elif isinstance(block, types.PageBlockAuthorDate):
                            if hasattr(block,'published_date') and block.published_date:
-                              html_spoiler += "<br><br>"+str(block.published_date)
+                              html_spoiler += "<br><br>"+block.published_date.strftime("%d de %B de %Y")
                            if hasattr(block,'author') and block.author:
-                              html_spoiler += " por "+extract_text_block(block.author)
+                              autor = extract_text_block(block.author)
+                              if autor!="":
+                                 html_spoiler += " por "+autor
                         elif isinstance(block, types.PageBlockPhoto):
                            if hasattr(block,'photo_id') and block.photo_id:
                               for cached_photo in m.web_preview.cached_page.photos:
@@ -1545,8 +1571,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                      html_spoiler += '<center><video controls><source type="data:video/mp4;base64,{}" alt="{}"></video></center>'.format(base64.b64encode(await client.download_media(cached_video,bytes)).decode(),'VIDEO')
                         elif isinstance(block, types.PageBlockAnchor):
                            html_spoiler += ""
+                        elif isinstance(block, types.PageBlockDivider):
+                           html_spoiler += "<br><hr>"
                         else:
                            html_spoiler += "<br><br>"+str(block)
+                    if len(html_spoiler)<MIN_SIZE_DOWN or (is_down and len(html_spoiler)<MAX_SIZE_DOWN):
+                       last_html = None
+                    else:
+                       text_message += "\n\nVista previa de "+sizeof_fmt(len(html_spoiler))+"\n⬇️ /down_"+str(m.id)
+                       html_spoiler = last_html
 
               #check if message has comments
               if hasattr(m,'post') and m.post:
@@ -1714,8 +1747,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_karurosagu_mail_bot"
-
+              
               #check if message is a poll
               if m.poll:
                  if hasattr(m.poll.poll, 'question') and m.poll.poll.question:
