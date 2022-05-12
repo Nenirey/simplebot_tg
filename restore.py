@@ -23,7 +23,8 @@ def db_init():
           print("La tabla existe, restaurando...")
           cur.execute("SELECT id, name, data FROM simplebot_db")
           simple_data = cur.fetchone()
-          open(botzipdb, 'wb').write(simple_data[2])
+          if simple_data[2]:
+             open(botzipdb, 'wb').write(simple_data[2])
        else:
           print("La tabla no existe, creando...")
           cur.execute("CREATE TABLE simplebot_db (id bigint PRIMARY KEY, name TEXT, data BYTEA)")
