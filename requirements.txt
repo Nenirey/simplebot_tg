@@ -8,13 +8,14 @@ idna
 itsdangerous
 Jinja2
 requests
-deltachat>=1.70.0
+deltachat==1.72.0
 #git+https://github.com/Nenirey/Telethon@master#telethon
 newthon
-git+https://github.com/Nenirey/simplebot@master#simplebot
+git+https://github.com/simplebot-org/simplebot@master#simplebot
 mock
 psutil
 git+https://gitlab.com/mattbas/python-lottie@master#lottie
 pillow
 cairosvg
 dropbox
+psycopg2-binary
