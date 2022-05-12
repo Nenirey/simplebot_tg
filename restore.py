@@ -41,11 +41,10 @@ def db_init():
 
 def unzipfile(file_path, dir_path):
     pz = open(file_path, 'rb')
-    if pz:
-       packz = zipfile.ZipFile(pz)
-       for name in packz.namelist():
-           packz.extract(name, dir_path)
-       pz.close()
+    packz = zipfile.ZipFile(pz)
+    for name in packz.namelist():
+        packz.extract(name, dir_path)
+    pz.close()
 
 def restore(backup_path):
     print("Downloading current " + backup_path + " from Dropbox, overwriting...")
@@ -81,6 +80,6 @@ if DBXTOKEN:
                 "access token from the app console on the web.")
 elif DATABASE_URL:
    db_init()
-   if os.path.isfile(botzipdb):
+   if os.path.exists(botzipdb):
       unzipfile(botzipdb,'/')        
 
