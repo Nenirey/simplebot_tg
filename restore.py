@@ -64,11 +64,7 @@ def restore(backup_path):
        code = str(sys.exc_info())
        print(code)
 
-if DATABASE_URL:
-   db_init()
-   if os.path.isfile(botzipdb):
-      unzipfile(botzipdb,'/')
-elif DBXTOKEN:
+if DBXTOKEN:
    if APP_KEY:
       dbx = dropbox.Dropbox(oauth2_refresh_token=DBXTOKEN, app_key=APP_KEY)
    else:
@@ -82,4 +78,8 @@ elif DBXTOKEN:
    except AuthError:
        sys.exit("ERROR: Invalid access token; try re-generating an "
                 "access token from the app console on the web.")
+elif DATABASE_URL:
+   db_init()
+   if os.path.isfile(botzipdb):
+      unzipfile(botzipdb,'/')        
 
