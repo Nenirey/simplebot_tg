@@ -42,14 +42,14 @@ from dropbox.exceptions import ApiError, AuthError
 from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
-import locale
-locale.setlocale(locale.LC_TIME, '')
+import psycopg2
 
-version = "0.2.5"
+version = "0.2.6"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
+DATABASE_URL = os.getenv('DATABASE_URL')
 bot_home = expanduser("~")
 
 global phonedb
@@ -106,10 +106,6 @@ loop = asyncio.new_event_loop()
 #Secure save storage to use in non persistent storage
 DBXTOKEN = os.getenv('DBXTOKEN')
 APP_KEY = os.getenv('APP_KEY')
-global LOGINFILE
-LOGINFILE = ''
-global AUTOCHATFILE
-AUTOCHATFILE = ''
 
 if APP_KEY:
    auth_flow = DropboxOAuth2FlowNoRedirect(APP_KEY, use_pkce=True, token_access_type='offline')
@@ -126,6 +122,12 @@ if DBXTOKEN:
        print("ERROR: Invalid access token; try re-generating an "
                 "access token from the app console on the web.")
 
+def save_bot_db():
+    if DATABASE_URL:
+       db_save()
+    elif DBXTOKEN:
+       backup_db()
+    
 
 def backup(backup_path):
     with open(backup_path, 'rb') as f:
@@ -150,90 +152,81 @@ def backup(backup_path):
                 print(err)
                 sys.exit()
 
-def restore(backup_path):
-    print("Downloading current " + backup_path + " from Dropbox, overwriting...")
-    if not os.path.exists(os.path.dirname(backup_path)):
-        os.makedirs(os.path.dirname(backup_path))
+def db_init():
     try:
-       if backup_path.startswith('.'):
-           dbx_backup_path = backup_path.replace('.','',1)
+       con = psycopg2.connect(DATABASE_URL)
+       cur = con.cursor()
+       cur.execute("SELECT * FROM information_schema.tables WHERE table_name=%s", ('simplebot_db',))
+       if bool(cur.rowcount):
+          print("La tabla existe!")
        else:
-           dbx_backup_path =backup_path
-       metadata, res = dbx.files_download(path = dbx_backup_path)
-       f = open(backup_path, 'wb')
-       f.write(res.content)
-       f.close()
-    except:
-       print("Error in restore " + backup_path)
+          print("La tabla no existe, creando...")
+          cur.execute("CREATE TABLE simplebot_db (id bigint PRIMARY KEY, name TEXT, data BYTEA)")
+          con.commit()
+          cur.execute("ALTER TABLE simplebot_db ALTER COLUMN data SET STORAGE EXTERNAL")
+          con.commit()
+       cur.close()
+    except Exception as error:
+       print('Cause: {}'.format(error))
+    finally:
+       if con is not None:
+           con.close()
+           print('Database connection closed.')
+
+def db_save():
+    try:
+       con = psycopg2.connect(DATABASE_URL)
+       cur = con.cursor()
+       print("Salvando a postgres...")
+       zipfile = zipdir(bot_home+'/.simplebot/', encode_bot_addr+'.zip')
+       bin = open(zipfile, 'rb').read()
+       #cur.execute("TRUNCATE simplebot_db")
+       #con.commit()
+       cur.execute("INSERT INTO simplebot_db(id,name,data) VALUES(%s,%s,%s) ON CONFLICT (id) DO UPDATE SET name = excluded.name, data = excluded.data", (0,encode_bot_addr, psycopg2.Binary(bin)))
+       con.commit()
+       cur.close()
+    except Exception as error:
+       print('Cause: {}'.format(error))
+    finally:
+       if con is not None:
+           con.close()
+           print('Database connection closed.')
 
 def zipdir(dir_path,file_path):
-    zf = zipfile.ZipFile(file_path, "w")
+    zf = zipfile.ZipFile(file_path, "w", compression=zipfile.ZIP_LZMA)
     for dirname, subdirs, files in os.walk(dir_path):
         if dirname.endswith('account.db-blobs'):
            continue
         zf.write(dirname)
         print(dirname)
         for filename in files:
-            #if filename=='account.db-wal' or filename=='account.db-shm' or filename=='bot.log':
+            #if filename=='bot.log':
             #   continue
             print(filename)
             zf.write(os.path.join(dirname, filename))
     zf.close()
     return file_path
 
-def unzipfile(file_path, dir_path):
-    pz = open(file_path, 'rb')
-    packz = zipfile.ZipFile(pz)
-    for name in packz.namelist():
-        packz.extract(name, dir_path)
-    pz.close()
+def savelogin(bot):
+    bot.set('LOGINDB',json.dumps(logindb))
+    save_bot_db()
 
-def savelogin():
-    if not os.path.exists(os.path.dirname(LOGINFILE)):
-       os.makedirs(os.path.dirname(LOGINFILE))
-    tf = open(LOGINFILE, 'w')
-    json.dump(logindb, tf)
-    tf.close()
-    if DBXTOKEN:
-       backup(LOGINFILE)
-    os.remove(LOGINFILE)
+def saveautochats(bot):
+    bot.set('AUTOCHATSDB',json.dumps(autochatsdb))
+    save_bot_db()
 
-def loadlogin():
-    if DBXTOKEN:
-       restore(LOGINFILE)
-    if os.path.isfile(LOGINFILE):
-       tf = open(LOGINFILE,'r')
-       global logindb
-       logindb=json.load(tf)
-       tf.close()
-       os.remove(LOGINFILE)
-       for (key,_) in logindb.items():
-           loop.run_until_complete(load_delta_chats(contacto=key))
-           time.sleep(5)
-    else:
-       print("File "+LOGINFILE+" not exists!!!")
-
-def saveautochats():
-    if not os.path.exists(os.path.dirname(AUTOCHATFILE)):
-       os.makedirs(os.path.dirname(AUTOCHATFILE))
-    tf = open(AUTOCHATFILE, 'w')
-    json.dump(autochatsdb, tf)
-    tf.close()
-    if DBXTOKEN:
-       backup(AUTOCHATFILE)
-    os.remove(AUTOCHATFILE)
-
-def loadautochats():
-    if DBXTOKEN:
-       restore(AUTOCHATFILE)
-    if os.path.isfile(AUTOCHATFILE):
-       tf = open(AUTOCHATFILE,'r')
-       global autochatsdb
-       autochatsdb=json.load(tf)
-       tf.close()
-       os.remove(AUTOCHATFILE)
-    else:
-       print("File "+AUTOCHATFILE+" not exists!!!")
+def fixautochats(bot):
+    cids = []
+    dchats = bot.account.get_chats()
+    for c in dchats:
+        cids.append(str(c.id))
+    #print('Chats guardados: '+str(cids))
+    tmpdict = copy.deepcopy(autochatsdb)
+    for (key, value) in tmpdict.items():
+        for (inkey, invalue) in value.items():
+            if str(inkey) not in cids:
+               printa('El chat '+str(inkey)+' no existe en el bot')
+               del autochatsdb[key][inkey]
 
 def backup_db():
     #bot.account.stop_io()
@@ -247,20 +240,6 @@ def backup_db():
     os.remove('./'+zipfile)
 
 #end secure save storage
-
-def fixautochatsdb(bot):
-    cids = []
-    dchats = bot.account.get_chats()
-    for c in dchats:
-        cids.append(str(c.id))
-    #print('Chats guardados: '+str(cids))
-    tmpdict = copy.deepcopy(autochatsdb)
-    for (key, value) in tmpdict.items():
-        for (inkey, invalue) in value.items():
-            if str(inkey) not in cids:
-               print('El chat '+str(inkey)+' no existe en el bot')
-               del autochatsdb[key][inkey]
-
 
 def extract_text_block(block):
     text_block = ""
@@ -298,8 +277,7 @@ class AccountPlugin:
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_group():
-             if DBXTOKEN:
-                backup_db()
+             save_bot_db()
 
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
@@ -364,7 +342,6 @@ def deltabot_init(bot: DeltaBot) -> None:
     global UPDATE_DELAY
     global white_list
     global black_list
-    global unreaddb
     MAX_MSG_LOAD = bot.get('MAX_MSG_LOAD') or 5
     MAX_MSG_LOAD = int(MAX_MSG_LOAD)
     MAX_MSG_LOAD_AUTO = bot.get('MAX_MSG_LOAD_AUTO') or 5
@@ -390,7 +367,6 @@ def deltabot_init(bot: DeltaBot) -> None:
        white_list = white_list.split()
     if black_list:
        black_list = black_list.split()
-    unreaddb = json.loads(bot.get('UNREADDB') or '{}')
     bot.commands.register(name = "/eval" ,func = eval_func, admin = True)
     bot.commands.register(name = "/start" ,func = start_updater, admin = True)
     bot.commands.register(name = "/stop" ,func = stop_updater, admin = True)
@@ -440,13 +416,14 @@ def deltabot_start(bot: DeltaBot) -> None:
     bot_addr = bot.account.get_config('addr')
     global encode_bot_addr
     encode_bot_addr = urllib.parse.quote(bot_addr, safe='')
-    global LOGINFILE
-    LOGINFILE = './'+encode_bot_addr+'/logindb.json'
-    global AUTOCHATFILE
-    AUTOCHATFILE = './'+encode_bot_addr+'/autochatsdb.json'
-    loadlogin()
-    loadautochats()
-    fixautochatsdb(bot)
+    global logindb
+    logindb = json.loads(bot.get('LOGINDB') or '{}')
+    global autochatsdb
+    autochatsdb = json.loads(bot.get('AUTOCHATSDB') or '{}')
+    fixautochats(bot)
+    for (key,_) in logindb.items():
+        loop.run_until_complete(load_delta_chats(contacto=key))
+        time.sleep(5)
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
@@ -560,7 +537,8 @@ async def read_unread(contacto,target,tg_id):
        await client.connect()
        await client.get_dialogs()
        mensajes = await client.get_messages(target, ids=[int(tg_id)])
-       await mensajes[0].mark_read()
+       if len(mensajes)>0 and mensajes[0]:
+          await mensajes[0].mark_read()
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -674,9 +652,9 @@ def link_to(bot, payload, replies, message):
     """Link chat with a Telegram chat"""
     if payload:
        tchat = payload.replace('@','')
+       tchat = tchat.replace(' ','_')
        bot.set(str(message.chat.id), tchat)
-       if DBXTOKEN:
-          backup_db()
+       save_bot_db()
        replies.add(text='Se ha asociado el chat de Telegram '+payload+' con este chat')
     else:
        replies.add(text='Debe proporcionar una id de chat de Telegram, ejemplo: @deltachat2')
@@ -927,7 +905,7 @@ async def add_auto_chats(bot, replies, message):
 def async_add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     loop.run_until_complete(add_auto_chats(bot, replies, message))
-    saveautochats()
+    saveautochats(bot)
     #if DBXTOKEN:
     #   backup_db(bot)
 
@@ -1026,7 +1004,7 @@ def remove_chat(bot, payload, replies, message):
     async_save_delta_chats(replies, message)
 
 
-def logout_tg(payload, replies, message):
+def logout_tg(bot, payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
     if message.get_sender_contact().addr in logindb:
        del logindb[message.get_sender_contact().addr]
@@ -1034,7 +1012,7 @@ def logout_tg(payload, replies, message):
           del clientdb[message.get_sender_contact().addr]
        if message.get_sender_contact().addr in autochatsdb:
           autochatsdb[message.get_sender_contact().addr].clear()
-       savelogin()
+       savelogin(bot)
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
        replies.add(text = 'Actualmente no está logueado en el puente')
@@ -1075,7 +1053,7 @@ def async_login_num(payload, replies, message):
     """Start session in Telegram. Example: /login +5312345678"""
     loop.run_until_complete(login_num(payload, replies, message))
 
-async def login_code(payload, replies, message):
+async def login_code(bot, payload, replies, message):
     try:
        if message.chat.is_group():
           return
@@ -1083,7 +1061,7 @@ async def login_code(payload, replies, message):
           try:
               me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)
               logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
-              savelogin()
+              savelogin(bot)
               replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
               replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
               await clientdb[message.get_sender_contact().addr].disconnect()
@@ -1099,20 +1077,20 @@ async def login_code(payload, replies, message):
        if replies:
           replies.add(text=code)
 
-def async_login_code(payload, replies, message):
+def async_login_code(bot, payload, replies, message):
     """Confirm session in Telegram. Example: /sms 12345"""
-    loop.run_until_complete(login_code(payload, replies, message))
+    loop.run_until_complete(login_code(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
 
-async def login_2fa(payload, replies, message):
+async def login_2fa(bot, payload, replies, message):
     try:
        if message.chat.is_group():
           return
        if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
           me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)
           logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
-          savelogin()
+          savelogin(bot)
           replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
           replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
           await clientdb[message.get_sender_contact().addr].disconnect()
@@ -1130,13 +1108,13 @@ async def login_2fa(payload, replies, message):
        if replies:
           replies.add(text=code)
 
-def async_login_2fa(payload, replies, message):
+def async_login_2fa(bot, payload, replies, message):
     """Confirm session in Telegram with 2FA. Example: /pass PASSWORD"""
-    loop.run_until_complete(login_2fa(payload, replies, message))
+    loop.run_until_complete(login_2fa(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
 
-async def login_session(payload, replies, message):
+async def login_session(bot, payload, replies, message):
     if message.chat.is_group():
        return
     if message.get_sender_contact().addr not in logindb:
@@ -1156,8 +1134,7 @@ async def login_session(payload, replies, message):
            nombre= (first_name + ' ' + last_name).strip()
            await client.disconnect()
            logindb[message.get_sender_contact().addr] = hash
-           if DBXTOKEN:
-              savelogin()
+           savelogin(bot)
            replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
        except:
           code = str(sys.exc_info())
@@ -1166,14 +1143,15 @@ async def login_session(payload, replies, message):
     else:
        replies.add(text='Su token es:\n\n'+logindb[message.get_sender_contact().addr])
 
-def async_login_session(payload, replies, message):
+def async_login_session(bot, payload, replies, message):
     """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
-    loop.run_until_complete(login_session(payload, replies, message))
+    loop.run_until_complete(login_session(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
 
 async def updater(bot, payload, replies, message):
     global DBXTOKEN
+    global DATABASE_URL
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
        return
@@ -1213,7 +1191,7 @@ async def updater(bot, payload, replies, message):
               else:
                  find_only = True
            if str(d.id) not in chatdb[message.get_sender_contact().addr] and not private_only and not find_only:
-              if DBXTOKEN:
+              if DBXTOKEN or DATABASE_URL:
                  titulo = str(ttitle)
                  if my_id == d.id:
                     titulo = 'Mensajes guardados'
@@ -1353,6 +1331,7 @@ def async_react_button(bot, message, replies, payload):
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
     global DBXTOKEN
+    global DATABASE_URL
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
     dchat = chat_id.get_name()
@@ -1907,14 +1886,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
           if m_id>-1 and dc_msg>-1:
              unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
-             bot.set('UNREADDB',json.dumps(unreaddb))
+             #bot.set('UNREADDB',json.dumps(unreaddb))
        if sin_leer-limite<=0 and not load_history and not is_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
        if load_history:
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
-       if DBXTOKEN:
+       if DBXTOKEN or DATABASE_URL:
           if dchat!=str(ttitle) and len(chat_id.get_contacts())<3:
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
@@ -2398,6 +2377,7 @@ def async_join_chats(bot, message, replies, payload):
 
 async def preview_chats(bot, payload, replies, message):
     global DBXTOKEN
+    global DATABASE_URL
     try:
         if message.get_sender_contact().addr not in logindb:
            replies.add(text = 'Debe iniciar sesión para visualizar chats!')
@@ -2471,7 +2451,7 @@ async def preview_chats(bot, payload, replies, message):
               else:
                  if hasattr(pchat, 'first_name') and pchat.first_name:
                     ttitle = str(pchat.first_name)
-           if DBXTOKEN:
+           if DBXTOKEN or DATABASE_URL:
               titulo = str(ttitle)
            else:
               titulo = str(ttitle)+' ['+str(uid)+']'
@@ -2540,7 +2520,7 @@ async def auto_load(bot, message, replies):
                          print('Bandeja llena...')
                          del unreaddb[key]
                       else:
-                         print('\nChat con mensajes por leer: '+str(inkey))
+                         print('\nMensajes por leer en: '+bot.get_chat(int(inkey)).get_name()+' ['+str(inkey)+']')
                    except:
                       code = str(sys.exc_info())
                       print(code)
@@ -2663,8 +2643,7 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
           replies.add(text = 'Unknown setting!, available settings below', html = available_settings)
           return
        bot.set(parametros[0].upper(), paramtext)
-       if DBXTOKEN:
-          backup_db()
+       save_bot_db()
        replies.add(text = 'Setting '+parametros[0]+' set to '+str(paramtext)+' successfully!')
 
 @simplebot.command(admin=True)
