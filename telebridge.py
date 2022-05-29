@@ -43,8 +43,9 @@ from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
 import psycopg2
+import html
 
-version = "0.2.6"
+version = "0.2.7"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -101,6 +102,22 @@ UPDATE_DELAY = 16
 global authorize_url
 authorize_url = None
 
+dark_html = """<!DOCTYPE html>
+       <html>
+       <head>
+       <meta charset="UTF-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+       <style>
+                       body {
+                       font-size: 18px;
+                       color: white;
+                       background-color: black;}
+                       a:link {
+                       color: #aaaaff;}
+       </style>
+       </head>
+       <body>"""
+
 loop = asyncio.new_event_loop()
 
 #Secure save storage to use in non persistent storage
@@ -126,8 +143,8 @@ def save_bot_db():
     if DBXTOKEN:
        backup_db()
     elif DATABASE_URL:
-       db_save()  
-    
+       db_save()
+
 
 def backup(backup_path):
     with open(backup_path, 'rb') as f:
@@ -200,8 +217,8 @@ def zipdir(dir_path,file_path):
         zf.write(dirname)
         print(dirname)
         for filename in files:
-            #if filename=='bot.log':
-            #   continue
+            if filename=='bot.db-journal':
+               continue
             print(filename)
             zf.write(os.path.join(dirname, filename))
     zf.close()
@@ -225,7 +242,7 @@ def fixautochats(bot):
     for (key, value) in tmpdict.items():
         for (inkey, invalue) in value.items():
             if str(inkey) not in cids:
-               printa('El chat '+str(inkey)+' no existe en el bot')
+               print('El chat '+str(inkey)+' no existe en el bot')
                del autochatsdb[key][inkey]
 
 def backup_db():
@@ -269,6 +286,13 @@ def extract_text_block(block):
        else:
           text_block += str(block.text)
     return text_block
+    
+def remove_attach(filename):
+    head, tail = os.path.split(filename)
+    bot_attach = bot_home+'/.simplebot/accounts/'+encode_bot_addr+'/account.db-blobs/'+str(tail)
+    if os.path.exists(bot_attach):
+       print("Eliminando adjunto "+filename)
+       os.remove(bot_attach)
 
 class AccountPlugin:
       #def __init__(self, bot:DeltaBot) -> None:
@@ -400,6 +424,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/react" ,func = async_react_button)
     bot.commands.register(name = "/link2" ,func = link_to, admin = True)
     bot.commands.register(name = "/dbxtoken" ,func = get_dbxtoken, admin = True)
+    bot.commands.register(name = "/chat" ,func = create_comment_chat)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -508,6 +533,24 @@ def get_tg_id(chat, bot):
     else:
        return None
 
+def get_tg_reply(chat, bot):
+    f_id = bot.get("rp2_"+str(chat.id))
+    if f_id:
+       tg_ids = [f_id]
+    else:
+       dchat = chat.get_name()
+       tg_ids = re.findall(r"\(([\-A-Za-z0-9_]+)\)", dchat)
+       if len(tg_ids)>0:
+          bot.set("rp2_"+str(chat.id),tg_ids[-1])
+    if len(tg_ids)>0:
+       if tg_ids[-1].lstrip('-').isnumeric():
+          f_id = int(tg_ids[-1])
+       else:
+          f_id = tg_ids[-1]
+       return f_id
+    else:
+       return None
+
 def print_dep_message(loader):
     if not loader.failed_modules:
         return
@@ -547,6 +590,10 @@ async def read_unread(contacto,target,tg_id):
 def async_read_unread(contacto, target, tg_id):
     loop.run_until_complete(read_unread(contacto, target, tg_id))
 
+def safe_html(hcode):
+    scode = html.escape(hcode)
+    return scode
+    
 async def chat_news(bot, payload, replies, message):
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ver sus chats!')
@@ -561,7 +608,7 @@ async def chat_news(bot, payload, replies, message):
        me = await client.get_me()
        my_id = me.id
        all_chats = await client.get_dialogs(ignore_migrated = True)
-       chat_list = ''
+       chat_list = ""
        chat_count = 0
        is_full = (payload.lower().find('full')>=0)
        is_img = (payload.lower().find('img')>=0)
@@ -570,12 +617,13 @@ async def chat_news(bot, payload, replies, message):
        for d in all_chats:
            if d.unread_count>0:
               no_leidos = str(d.unread_count)
+              no_leidos = '<a style="color:white;background:red;border-radius:15px;padding-left:3px;padding-top:3px;padding-right:3px;padding-bottom:3px">'+no_leidos+'</a>'
            else:
+              no_leidos = ''
               if not is_full:
                  continue
-              no_leidos = ''
            if hasattr(d.entity,'username') and d.entity.username:
-              uname = str(d.entity.username)
+              uname = safe_html(str(d.entity.username))
            else:
               uname = 'None'
            if is_private:
@@ -590,17 +638,17 @@ async def chat_news(bot, payload, replies, message):
               ttitle = d.title
            tid = str(d.id)
            if True:
-              titulo = str(ttitle)
+              titulo = safe_html(str(ttitle))
               if my_id == d.id:
                  titulo = 'Mensajes guardados'
+              profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+str(titulo[0])+'</center></div>'
               if str(d.id) in chatdb[message.get_sender_contact().addr]:
-                 comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>'
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>&nbsp; &nbsp; &nbsp;<a href="mailto:?body=/link2_'+str(d.id)+'">↔️ Vincular con...</a>'
               else:
-                 comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>'
+                 comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>&nbsp; &nbsp; &nbsp;<a href="mailto:?body=/link2_'+str(d.id)+'">↔️ Vincular con...</a>'
               try:
-                  profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+titulo[0]+'</center></div>'
                   if is_img:
-                     profile_photo = '<img src="data:image/jpeg;base64,{}" alt="{}" style="width:50px;height:50px;border-radius:25px"/>'.format(base64.b64encode(await client.download_profile_photo(d.id,bytes,download_big=False)).decode(),titulo)
+                     profile_photo = '<img src="data:image/jpeg;base64,{}" alt="{}" style="width:50px;height:50px;border-radius:25px"/>'.format(base64.b64encode(await client.download_profile_photo(d.id,bytes,download_big=False)).decode(), str(titulo[0]))
                   else:
                      profile_photo = profile_letter
               except:
@@ -611,13 +659,13 @@ async def chat_news(bot, payload, replies, message):
                        try:
                           full_pchat = await client(functions.users.GetFullUserRequest(id = d.message.from_id.user_id))
                           if hasattr(full_pchat,'users') and full_pchat.users:
-                             send_by = '<br><b>'+str(full_pchat.users[0].first_name)+'</b>'
+                             send_by = '<br><b>'+safe_html(str(full_pchat.users[0].first_name))+'</b>'
                        except:
                           print('Error obteniendo entidad '+str(d.message.from_id.user_id))
                           try:
                              pchat = await client.get_entity(d.message.from_id.user_id)
                              if hasattr(pchat, 'first_name') and pchat.first_name:
-                                send_by = '<br><b>'+str(pchat.first_name)+'</b>'
+                                send_by = '<br><b>'+safe_html(str(pchat.first_name))+'</b>'
                           except:
                              continue
                  if hasattr(d.message,'message') and d.message.message:
@@ -630,15 +678,17 @@ async def chat_news(bot, payload, replies, message):
                  else:
                     last_message = '[imagen/archivo]'
               chat_count +=1
-              chat_list += '<table><tr><td>'+profile_photo+'</td><td><b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px"> '+no_leidos+' </a>'+send_by+'<br>'+last_message+comando+'</td></tr></table><hr>'
+              chat_list += '<table><tr><td>'+str(profile_photo)+'</td><td><b>'+str(titulo)+'</b>&nbsp;&nbsp;'+str(no_leidos)+str(send_by)+'<br>'+str(safe_html(last_message))+str(comando)+'</td></tr></table><hr>'
               #bubbles
               #chat_list += '<br><div style="border-radius:3px;color:white;background:#7777ff">'+profile_photo+'<b>'+titulo+'</b> <a style="color:white;background:red;border-radius:15px">'+no_leidos+'</a>'+send_by+'<br>'+last_message+comando+'</div>'
               #img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
+       chat_list += "</body></html>"
        await client.disconnect()
        replies.add(text=str(chat_count)+' chats',html=chat_list)
-    except:
-       code = str(sys.exc_info())
-       replies.add(text=code)
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       print(estr)
+       replies.add(text=estr)
 
 def async_chat_news(bot, payload, replies, message):
     """See a list of all your chats status/unread from telegram. Example: /news
@@ -657,10 +707,13 @@ def link_to(bot, payload, replies, message):
        save_bot_db()
        replies.add(text='Se ha asociado el chat de Telegram '+payload+' con este chat')
     else:
-       replies.add(text='Debe proporcionar una id de chat de Telegram, ejemplo: @deltachat2')
+       bot.set(str(message.chat.id),None)
+       bot.set("rp2_"+str(message.chat.id),None)
+       replies.add(text='Este chat se desvinculó de Telegram!')
 
 async def chat_info(bot, payload, replies, message):
     f_id = get_tg_id(message.chat, bot)
+    c_id = get_tg_reply(message.chat, bot)
     if not f_id:
        replies.add(text = 'Este no es un chat de telegram!')
        return
@@ -685,7 +738,14 @@ async def chat_info(bot, payload, replies, message):
              if not t_reply:
                 replies.add(text='No se encontró la referencia de este mensaje con el de Telegram', quote=message)
              else:
-                mensaje = await client.get_messages(f_id, ids=[t_reply])
+                if c_id:
+                   mensaje = []
+                   async for m in client.iter_messages(f_id, reply_to = c_id):
+                         if m.id == t_reply:
+                            mensaje.append(m)
+                            break
+                else:
+                   mensaje = await client.get_messages(f_id, ids=[t_reply])
                 if mensaje and mensaje[0]:
                    if mensaje[0].from_id:
                       if isinstance(mensaje[0].from_id, types.PeerUser):
@@ -968,37 +1028,42 @@ def remove_chat(bot, payload, replies, message):
     """Remove current chat from telegram bridge. Example: /remove
        you can pass the all parametre to remove all chats like: /remove all or a telegram chat id
     like: /remove -10023456789"""
+    target = None
+    self_target = get_tg_id(message.chat, bot)
+    rpto = get_tg_reply(message.chat, bot)
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para eliminar chats!')
        return
-    if message.get_sender_contact().addr not in chatdb:
-       replies.add(text = 'No tiene ningun chat vinculado!')
-       return
     if not payload or payload =='':
-       target = get_tg_id(message.chat, bot)
-       if not target:
-          replies.add(text = 'Este no es un chat de Telegram!')
-          return
+       if not self_target:
+          replies.add(text = 'Este chat no está vinculado a Telegram!')
     else:
        target = payload.replace(' ','_')
+    any_target = target or self_target
     if target == 'all':
-       chatdb[message.get_sender_contact().addr].clear()
+       if message.get_sender_contact().addr in chatdb:
+          chatdb[message.get_sender_contact().addr].clear()
        if message.get_sender_contact().addr in autochatsdb:
           autochatsdb[message.get_sender_contact().addr].clear()
        replies.add(text = 'Se desvincularon todos sus chats de telegram.')
     else:
-       if target in chatdb[message.get_sender_contact().addr]:
-          c_title = chatdb[message.get_sender_contact().addr][target]
-          del chatdb[message.get_sender_contact().addr][target]
-          replies.add(text = 'Se desvinculó el chat delta '+str(c_title)+' con el chat telegram '+str(target))
+       if self_target and not target:
+          bot.set(str(message.chat.id),None)
+          if rpto:
+             bot.set("rp2_"+str(message.chat.id),None)
+       if str(any_target) in chatdb[message.get_sender_contact().addr]:
+          c_title = chatdb[message.get_sender_contact().addr][str(any_target)]
+          del chatdb[message.get_sender_contact().addr][str(any_target)]
+          replies.add(text = 'Se desvinculó el chat delta '+str(c_title)+' con el chat telegram '+str(any_target))
        else:
           replies.add(text = 'Este chat no está vinculado a telegram')
        try:
           if message.get_sender_contact().addr in autochatsdb:
              for (key, value) in autochatsdb[message.get_sender_contact().addr].items():
-                 if str(value) == target:
+                 if str(value) == str(target) or (target is None and str(key) == str(message.chat.id)):
                     del autochatsdb[message.get_sender_contact().addr][str(key)]
-                    replies.add(text = 'Se desactivaron las actualizaciones para el chat '+str(key))
+                    replies.add(text = 'Se desactivaron las actualizaciones para el chat '+bot.get_chat(int(key)).get_name())
+                    break
        except:
           print('Dictionary change size...')
     async_save_delta_chats(replies, message)
@@ -1343,8 +1408,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        max_limit = MAX_MSG_LOAD
        is_down = message.text.lower().startswith('/down')
        is_comment = message.text.lower().startswith('/comment')
+    
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id, bot)
+    rpto = get_tg_reply(chat_id, bot)
     if not target:
        myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
        myreplies.send_reply_messages()
@@ -1380,26 +1447,56 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
              else:
                 last_name= ""
              ttitle = (first_name + ' ' + last_name).strip()
+       if rpto:
+          t = await client.get_messages(target, reply_to=rpto)
        sin_leer = tchat.dialogs[0].unread_count
        limite = 0
        load_history = False
        show_id = False
        if payload and payload.lstrip('-').isnumeric():
           if payload.isnumeric():
-             all_messages = await client.get_messages(target, limit = 10, ids = [int(payload)])
+             if rpto:
+                all_messages = []
+                async for r in client.iter_messages(target, reply_to=rpto):
+                      if r.id == int(payload):
+                         all_messages.append(r)
+                         break
+             else:
+                all_messages = await client.get_messages(target, limit = 10, ids = [int(payload)])
           else:
-             all_messages = await client.get_messages(target, min_id = int(payload.lstrip('-')), limit = int(payload.lstrip('-'))+10)
+             if rpto:
+                all_messages = []
+                async for r in client.iter_messages(target, reverse=True, reply_to=rpto):
+                      if r.id>int(payload.lstrip('-')):
+                         all_messages.append(r)
+                      if len(all_messages)>max_limit:
+                         break
+             else:
+                all_messages = await client.get_messages(target, min_id = int(payload.lstrip('-')), limit = int(payload.lstrip('-'))+10)
              load_history = True
        else:
           if payload.lower()=='last':
              show_id = True
-             all_messages = await client.get_messages(target, limit = 1)
+             all_messages = await client.get_messages(target, reply_to=rpto, limit = 1)
           else:
-             all_messages = await client.get_messages(target, limit = sin_leer)
+             if rpto:
+                all_messages = []
+                rp_message = await client.get_messages(target, ids=[rpto])
+                last_unread = rp_message[0].replies.read_max_id
+                sin_leer = rp_message[0].replies.replies
+                async for r in client.iter_messages(target, reverse=True, reply_to = rpto):
+                      if not last_unread or r.id>last_unread:
+                         all_messages.append(r)
+                      else:
+                         sin_leer-=1
+                      if len(all_messages)>max_limit:
+                         break
+             else:
+                all_messages = await client.get_messages(target, limit = sin_leer)
              if payload and payload.startswith('+') and payload.lstrip('+').isnumeric() and bot.is_admin(contacto):
                 max_limit = int(payload.lstrip('+'))
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
-       if sin_leer>0 or load_history or show_id:
+       if (sin_leer>0 or load_history or show_id) and not rpto:
           all_messages.reverse()
        m_id = -1
        dc_msg = -1
@@ -1563,11 +1660,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message has comments
               if hasattr(m,'post') and m.post:
                  try:
-                    comentarios = await client.get_messages(target, reply_to=m.id, limit = 200)
+                    comentarios = []
+                    async for r in client.iter_messages(target, reply_to=m.id):
+                          comentarios.append(r)
+                    #comentarios = await client.get_messages(target, reply_to=m.id, limit = 200)
                  except:
                     comentarios = None
-                 if comentarios and not is_comment:
-                    comment_text = '\n\n---\n'+str(len(comentarios))+' comentarios > /comment_'+str(m.id)
+                 if m.replies and not is_comment:
+                    comment_text = '\n\n---\n💬 '+str(m.replies.replies)+' comentarios > /comment_'+str(m.id)+' /chat_'+str(m.id)
                  if is_comment and comentarios and len(comentarios)>0:
                     comentarios.reverse()
                     if html_spoiler:
@@ -1577,15 +1677,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     for coment in comentarios:
                         if isinstance(coment.from_id, types.PeerUser):
                            full = await client(GetFullUserRequest(coment.from_id))
-                           from_coment = str(full.users[0].first_name)
+                           from_coment = safe_html(str(full.users[0].first_name))
                         else:
                            from_coment = "Unknown"
                         if coment.photo:
-                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await coment.download_media(bytes)).decode(),coment.raw_text)
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}" style="width:100%"/></center>'.format(base64.b64encode(await coment.download_media(bytes)).decode(),safe_html(coment.raw_text))
                         elif coment.media and hasattr(coment.media,'document') and coment.media.document and hasattr(coment.media.document,'thumbs') and coment.media.document.thumbs:
-                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}"/></center>'.format(base64.b64encode(await coment.download_media(bytes, thumb=0)).decode(),coment.raw_text)
+                           file_comment = '<center><img src="data:image/png;base64,{}" alt="{}"/></center>'.format(base64.b64encode(await coment.download_media(bytes, thumb=0)).decode(),safe_html(coment.raw_text))
                         else:
-                           file_comment = (coment.message or '[ARCHIVO/VIDEO]').replace('\n', '<br>')
+                           file_comment = (safe_html(coment.message) or '[ARCHIVO/VIDEO]').replace('\n', '<br>')
                         html_spoiler += "<br><div style='border-radius:10px;color:white;background:#7777ff;padding-left:5px;padding-top:5px;padding-right:5px;padding-bottom:5px'><b>"+from_coment+"</b><br>"+file_comment+"</div>"
 
 
@@ -1626,7 +1726,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        except:
                           print('Unregister dc_msg '+str(dc_mid))
                     if not quote:
-                       mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
+                       if rpto:
+                          mensaje = []
+                          async for r in client.iter_messages(target, reply_to = rpto):
+                                if r.id == m.reply_to.reply_to_msg_id:
+                                   mensaje.append(r)
+                                   break
+                       else:
+                          mensaje = await client.get_messages(target, ids = [m.reply_to.reply_to_msg_id])
                        if mensaje and mensaje[0]:
                           reply_text = ''
                           if hasattr(mensaje[0],'sender') and mensaje[0].sender and hasattr(mensaje[0].sender,'first_name') and mensaje[0].sender.first_name:
@@ -1679,8 +1786,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  elif isinstance(m.action, types.MessageActionChatEditPhoto):
                     mservice += '_Foto del grupo/canal cambiada_\n'
                     try:
-                       profile_photo = await client.download_profile_photo(target, contacto)
-                       chat_id.set_profile_image(profile_photo)
+                       if len(chat_id.get_contacts())<3 or (contacto in chatdb and str(target) in chatdb[contacto]):
+                          profile_photo = await client.download_profile_photo(target, contacto)
+                          chat_id.set_profile_image(profile_photo)
                     except:
                        print('Error actualizando photo de perfil')
 
@@ -1708,8 +1816,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     else:
                        sender_name = " via @"+str(full_bot.users[0].username)
                  else:
-                    sender_name = sender_name.replace(':\n',' ')
-                    sender_name += "via @"+full_bot.users[0].username+":\n"
+                    if sender_name:
+                       sender_name = sender_name.replace(':\n',' ')
+                       sender_name += "via @"+full_bot.users[0].username+":\n"
+                    else:
+                       sender_name = "via @"+full_bot.users[0].username+":\n"
 
               #check if message have buttons
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
@@ -1726,7 +1837,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          ncolumn += 1
                      html_buttons += '\n'
                      nrow += 1
-              
+
               #check if message is a poll
               if m.poll:
                  if hasattr(m.poll.poll, 'question') and m.poll.poll.question:
@@ -1870,14 +1981,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               dc_msg = myreplies.send_reply_messages()[0].id
               if file_attach!='' and os.path.exists(file_attach):
                  os.remove(file_attach)
-                 head, tail = os.path.split(file_attach)
-                 bot_attach = bot_home+'/.simplebot/accounts/'+encode_bot_addr+'/account.db-blobs/'+str(tail)
-                 if os.path.exists(bot_attach):
-                    os.remove(bot_attach)
+                 remove_attach(file_attach)
               limite+=1
               register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
-              if SYNC_ENABLED==0 or not is_auto:
-                 await m.mark_read()
+              if SYNC_ENABLED==0 or not is_auto or rpto:
+                 if rpto:
+                    await client(functions.messages.ReadDiscussionRequest(t[0].chat, m.id, m.id))
+                 else:
+                    await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
@@ -1894,7 +2005,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
        if DBXTOKEN or DATABASE_URL:
-          if dchat!=str(ttitle) and len(chat_id.get_contacts())<3:
+          if dchat!=str(ttitle) and len(chat_id.get_contacts())<3 and not rpto:
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
        await client.disconnect()
@@ -1940,7 +2051,7 @@ async def echo_filter(bot, message, replies):
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
     dchat = message.chat.get_name()
-
+    c_id = get_tg_reply(message.chat, bot)
     target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
@@ -1951,15 +2062,16 @@ async def echo_filter(bot, message, replies):
        await client.get_dialogs()
        mquote = ''
        t_reply = None
-       t_comment = None
+       t_comment = c_id
        if message.quote:
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
           if t_reply:
              t_message = await client.get_messages(target,ids=[t_reply])
              if t_message and hasattr(t_message[0],'post') and t_message[0].post:
                 print('escribiendo en Canal...')
-                t_comment = t_reply
-                t_reply = None
+                if not c_id:
+                   t_comment = t_reply
+                   t_reply = None
           if not t_reply and not t_comment:
              if message.quote.is_gif():
                 mquote += '[GIF]'
@@ -1975,7 +2087,7 @@ async def echo_filter(bot, message, replies):
              if len(mquote)>65:
                 mquote = mquote[0:65]+'...'
              mquote = '>'+mquote.replace('\n','\n>')+'\n\n'
-
+         
        mtext = mquote+message.text
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
@@ -1991,14 +2103,19 @@ async def echo_filter(bot, message, replies):
              else:
                 m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+          remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
                  m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
-             m = await client.send_message(target,mtext, reply_to = t_reply, comment_to = t_comment)
-             register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+             if c_id and t_reply:
+                entity, comment_to = await client._get_comment_data(target, c_id)
+                m = await client(functions.messages.SendMessageRequest(entity, message=mtext, reply_to_msg_id=t_reply))
+             else:
+                m = await client.send_message(target, mtext, reply_to = t_reply, comment_to = t_comment)
+                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, mtext))
@@ -2042,6 +2159,7 @@ async def send_cmd(bot, message, replies, payload):
              m = await client.send_file(target, message.filename, caption = payload, voice_note=True, reply_to=t_reply)
           else:
              m = await client.send_file(target, message.filename, caption = payload, reply_to=t_reply)
+          remove_attach(message.filename)
        else:
           if payload:
              m = await client.send_message(target,payload, reply_to=t_reply)
@@ -2109,7 +2227,7 @@ async def inline_cmd(bot, message, replies, payload):
     if len(payload.split())>1 or is_more or is_click or is_down:
        parametros = payload.split()
        inline_bot = parametros[0].replace('@','')
-       inline_search = payload.replace(parametros[0],'',1)
+       inline_search = payload.replace(inline_bot,'',1)
     else:
        replies.add(text = 'Debe proporcionar el nombre del bot y el termino de búsqueda, ejemplo: /inline gif gaticos\nAqui hay otros ejemplos probados:\n'+example_inline)
        return
@@ -2485,6 +2603,25 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
     except:
        code = str(sys.exc_info())
     replies.add(text=code or "echo")
+    
+def create_comment_chat(bot, message, replies, payload):
+    """Create a comment chat for post messages like /chat 1234"""
+    target = get_tg_id(message.chat, bot)
+    if DBXTOKEN or DATABASE_URL:
+       tmp_name = message.chat.get_name()
+    else:
+       tmp_name = message.chat.get_name()+' ['+str(target)+']'
+    chat_id = bot.create_group(tmp_name, [message.get_sender_contact()])
+    bot.set(str(chat_id.id),str(target))
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = chat_id.id, is_auto = True))
+    replies.add(text = "Cargar más comentarios\n/more", chat = chat_id)
+    bot.set("rp2_"+str(chat_id.id), payload)
+    if DBXTOKEN or DATABASE_URL:
+       chat_name ='💬 '+message.chat.get_name()
+    else:
+       chat_name ='💬 '+message.chat.get_name()+' ['+str(target)+']('+payload+')'
+    chat_id.set_name(chat_name)
+    replies.add(text='Chat de comentarios creado!')
 
 def confirm_unread(bot: DeltaBot, chat_id):
     chat_messages = bot.get_chat(chat_id).get_messages()
