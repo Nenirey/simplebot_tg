@@ -641,6 +641,8 @@ async def chat_news(bot, payload, replies, message):
               titulo = safe_html(str(ttitle))
               if my_id == d.id:
                  titulo = 'Mensajes guardados'
+              if len(titulo)<1:
+                 titulo = '?'
               profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+str(titulo[0])+'</center></div>'
               if str(d.id) in chatdb[message.get_sender_contact().addr]:
                  comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>&nbsp; &nbsp; &nbsp;<a href="mailto:?body=/link2_'+str(d.id)+'">↔️ Vincular con...</a>'
