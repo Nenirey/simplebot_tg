@@ -1383,7 +1383,8 @@ async def react_button(bot, message, replies, payload):
                  text_reactions+=r.reaction
              replies.add(text = "Reacciones disponibles en este chat:\n\n"+text_reactions)
        else:
-          await client.send_reaction(target,t_reply,parametros[0])
+          await client(functions.messages.SendReactionRequest(peer=target, msg_id=t_reply, reaction=parametros[0]))
+          #await client.send_reaction(target,t_reply,parametros[0])
        await client.disconnect()
     except:
        code = str(sys.exc_info())
