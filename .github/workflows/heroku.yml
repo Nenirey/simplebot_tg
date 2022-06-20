@@ -14,5 +14,5 @@ jobs:
           heroku_email: ${{secrets.HEROKU_EMAIL}}
           usedocker: false
           docker_heroku_process_type: web
-          stack: "heroku-20"
+          stack: "heroku-22"
           region: "us"
