@@ -45,7 +45,7 @@ import base64
 import psycopg2
 import html
 
-version = "0.2.7"
+version = "0.2.8"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -1418,6 +1418,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     if not target:
        myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
        myreplies.send_reply_messages()
+       if is_auto and dc_contact in autochatsdb and str(dc_id) in autochatsdb[dc_contact]:
+          del autochatsdb[dc_contact][str(dc_id)]
        return
 
     if contacto not in logindb:
@@ -1982,16 +1984,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               m_id = m.id
               #print('Leyendo mensaje '+str(m_id))
               dc_msg = myreplies.send_reply_messages()[0].id
+              if rpto:
+                await client(functions.messages.ReadDiscussionRequest(t[0].chat, m.id, m.id))
+              else:
+                await m.mark_read()
+              limite+=1
+              register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
               if file_attach!='' and os.path.exists(file_attach):
                  os.remove(file_attach)
                  remove_attach(file_attach)
-              limite+=1
-              register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
-              if SYNC_ENABLED==0 or not is_auto or rpto:
-                 if rpto:
-                    await client(functions.messages.ReadDiscussionRequest(t[0].chat, m.id, m.id))
-                 else:
-                    await m.mark_read()
            else:
               if not load_history and not is_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
@@ -2104,8 +2105,12 @@ async def echo_filter(bot, message, replies):
                      m = await client.send_message(target, mtext[x:x+1024])
                      register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
              else:
-                m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
-                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                if c_id and t_reply:
+                   entity, comment_to = await client._get_comment_data(target, c_id)
+                   m = await client(functions.messages.SendMediaRequest(peer=entity, media=types.InputMediaUploadedDocument(file=client.upload_file(message.filename)), caption=mtext, reply_to_msg_id=t_reply))
+                else:
+                   m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
+                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
@@ -2661,9 +2666,11 @@ async def auto_load(bot, message, replies):
                          del unreaddb[key]
                       else:
                          print('\nMensajes por leer en: '+bot.get_chat(int(inkey)).get_name()+' ['+str(inkey)+']')
-                   except:
-                      code = str(sys.exc_info())
-                      print(code)
+                   except Exception as e:
+                      estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+                      print(estr)
+                      print("Eliminando chat invalido "+autochatsdb[key][inkey])
+                      del autochatsdb[key][inkey]
                    time.sleep(0.100)
         except:
            print('Error in autochatsdb dict')
