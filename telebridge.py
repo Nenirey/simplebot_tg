@@ -1904,7 +1904,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.file_name
                            elif hasattr(attr,'title') and attr.title:
                               file_title = attr.title
-                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    if hasattr(m.document,'thumbs') and m.document.thumbs:
+                       file_attach = await client.download_media(m.document, contacto, thumb=-1)
+                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  no_media = False
 
               #check if message have media
@@ -2064,10 +2066,13 @@ async def echo_filter(bot, message, replies):
        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
+       #prevent ghost mode
+       if not c_id:
+         await client.send_read_acknowledge(target) 
        mquote = ''
        t_reply = None
        t_comment = c_id
-       if message.quote:
+       if message.quote: 
           t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
           if t_reply:
              t_message = await client.get_messages(target,ids=[t_reply])
