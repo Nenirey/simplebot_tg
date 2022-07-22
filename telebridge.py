@@ -45,7 +45,7 @@ import base64
 import psycopg2
 import html
 
-version = "0.2.8"
+version = "0.2.10"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -278,6 +278,13 @@ def extract_text_block(block):
              text_block += extract_text_block(block.text)
        elif isinstance(block.text,types.TextUrl):
           text_block += extract_text_block(block.text)
+       elif isinstance(block.text,types.TextFixed):
+          text_block += "<i>"+extract_text_block(block.text)+"</i>"
+       elif isinstance(block.text,types.TextAnchor):
+          if hasattr(block.text, 'name'):
+             text_block += "<anchor name='"+block.text.name+"'>"+extract_text_block(block.text)+"</anchor>"
+          else:
+             text_block += "<anchor>"+extract_text_block(block.text)+"</anchor>"
        elif isinstance(block.text,types.TextConcat):
           for tc in block.text.texts:
               text_block += extract_text_block(tc)
@@ -305,7 +312,8 @@ class AccountPlugin:
 
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
-          #print(ffi_event)
+          if ffi_event.name=="DC_EVENT_WEBXDC_STATUS_UPDATE":
+             print(ffi_event)
           if ffi_event.name == "DC_EVENT_WARNING":
              #print('Evento warning detectado!', ffi_event)
              if ffi_event.data2 and ffi_event.data2.find("Daily user sending quota exceeded")>=0:
@@ -329,6 +337,7 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
     if black_list and sender_addr!=admin_addr and sender_addr in black_list:
        print('Usuario '+str(message.get_sender_contact().addr)+' esta en la lista negra')
        return True
+    #print(message)
     """
     if message.chat.is_group():
        if get_tg_id(message.chat, bot):
@@ -517,9 +526,10 @@ def find_register_msg(contacto, dc_id, tg_msg):
 
 def get_tg_id(chat, bot):
     f_id = bot.get(str(chat.id))
+    tg_ids = []
     if f_id:
        tg_ids = [f_id]
-    else:
+    elif not DBXTOKEN and not DATABASE_URL:
        dchat = chat.get_name()
        tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
        if len(tg_ids)>0:
@@ -535,11 +545,12 @@ def get_tg_id(chat, bot):
 
 def get_tg_reply(chat, bot):
     f_id = bot.get("rp2_"+str(chat.id))
-    if f_id:
+    tg_ids = []
+    if f_id and (DBXTOKEN or DATABASE_URL):
        tg_ids = [f_id]
-    else:
+    elif not DBXTOKEN and not DATABASE_URL:
        dchat = chat.get_name()
-       tg_ids = re.findall(r"\(([\-A-Za-z0-9_]+)\)", dchat)
+       tg_ids = re.findall(r"\(([0-9]+)\)", dchat)
        if len(tg_ids)>0:
           bot.set("rp2_"+str(chat.id),tg_ids[-1])
     if len(tg_ids)>0:
@@ -1630,12 +1641,52 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                            for row in block.rows:
                                html_spoiler += "<tr>"
                                for cell in row.cells:
-                                   html_spoiler += "<td>"+extract_text_block(cell)+"</td>"
+                                   if hasattr(cell,'text') and cell.text and hasattr(cell.text,'text') and cell.text.text and isinstance(cell.text.text, types.TextImage) and hasattr(cell.text.text,"document_id"):
+                                      if hasattr(cell.text.text,'w') and cell.text.text.w:
+                                         img_tw = str(cell.text.text.w)
+                                      else:
+                                         img_tw = "100%"
+                                      for cached_photo in m.web_preview.cached_page.documents:
+                                          if cached_photo.id == cell.text.text.document_id:
+                                             html_spoiler += '<td><center><img src="data:image/png;base64,{}" alt="{}" style="width:'.format(base64.b64encode(await client.download_media(cached_photo, bytes, thumb=-1)).decode(),'Article photo')+img_tw+'"/></center></td>'
+                                   else:
+                                     html_spoiler += "<td>"+extract_text_block(cell)+"</td>"
                                html_spoiler += "</tr>"
                            html_spoiler += "</table>"
                         elif isinstance(block, types.PageBlockEmbedPost):
                            for post in block.blocks:
                                html_spoiler += "<br><br>"+extract_text_block(post)
+                        elif isinstance(block, types.PageBlockDetails):
+                           if hasattr(block, 'title') and block.title:
+                              html_spoiler += "<br><br>"+extract_text_block(block.title)
+                           for detail in block.blocks:
+                               if isinstance(detail, types.PageBlockList):
+                                  for item in detail.items:
+                                      if isinstance(item, types.PageListItemBlocks):
+                                         for iblock in item.blocks:
+                                             if isinstance(iblock, types.PageListItemBlocks):
+                                                for iiblock in iblock.blocks:
+                                                    html_spoiler += "<br><br>"+extract_text_block(iiblock)
+                                                    if isinstance(iiblock, types.PageBlockList):
+                                                       for liiblock in iiblock.items:
+                                                           html_spoiler += "<br><br>"+extract_text_block(liiblock)
+                                                    else:
+                                                       html_spoiler += str(iiblock)
+                                             elif isinstance(iblock, types.PageBlockList):
+                                                for blockl in iblock.items:
+                                                    html_spoiler += "<br><br>"+extract_text_block(blockl)
+                                             elif isinstance(iblock, types.PageBlockParagraph):
+                                                html_spoiler += "<br><br>"+extract_text_block(iblock)
+                                             else:
+                                                html_spoiler += str(iblock)
+                                      elif isinstance(item, types.PageListItemText):
+                                         html_spoiler += "<br><br>"+extract_text_block(item)
+                                      else:
+                                         html_spoiler += str(item)
+                               else:
+                                 html_spoiler += str(detail)
+                        elif isinstance(block, types.PageBlockPreformatted):
+                           html_spoiler += "<br><br>"+extract_text_block(block)
                         elif isinstance(block, types.PageBlockRelatedArticles):
                            for article in block.articles:
                                if hasattr(article,'title') and article.title:
@@ -2042,21 +2093,48 @@ def async_down_chat_messages(bot, message, replies, payload):
     loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 def async_comment_chat_messages(bot, message, replies, payload):
-    """Show comments messages from telegram in a channel post,
+    """Show comments messages from telegram in a channel post or make a direct comment,
     you can add specific message id to show comment one message
     or with - sign show comment messages from this id number. Examples:
     show comments message #5: /comment 5
     show comments messages from #10: /comment -10
-    show last comments message in the chat: /comment last"""
-    loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+    show last comments message in the chat: /comment last
+    make direct comment: /comment 5 nice bike"""
+    if len(payload.split())<=1:
+      loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+    else:
+      loop.run_until_complete(direct_comment(bot=bot, message=message, replies=Replies, payload=payload))
+      
 
+async def direct_comment(bot, message, replies, payload):
+    """Write direct in chat to write a telegram chat"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para enviar comentarios, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
+       return
+    c_id = get_tg_reply(message.chat, bot)
+    target = get_tg_id(message.chat, bot)
+    parametros = payload.split()
+    comentario = payload.replace(parametros[0],'',1)
+    if not target:
+       replies.add(text = 'Este no es un chat de telegram!')
+       return
+    try:
+       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       await client.send_message(target, comentario, comment_to = int(parametros[0]))
+       await client.disconnect()
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       replies.add(text=estr)
 
 async def echo_filter(bot, message, replies):
     """Write direct in chat to write a telegram chat"""
+    if message.is_system_message():
+       return
     if message.get_sender_contact().addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
-    dchat = message.chat.get_name()
     c_id = get_tg_reply(message.chat, bot)
     target = get_tg_id(message.chat, bot)
     if not target:
@@ -2130,10 +2208,17 @@ async def echo_filter(bot, message, replies):
                 m = await client.send_message(target, mtext, reply_to = t_reply, comment_to = t_comment)
                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
-    except:
-       await client(SendMessageRequest(target, mtext))
-       code = str(sys.exc_info())
-       replies.add(text=code)
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       replies.add(text=estr)
+       """
+       try:
+          await client(SendMessageRequest(target, mtext))
+       except Exception as e:
+          estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+          replies.add(text=estr)
+          await client.disconnect()
+      """
 
 @simplebot.filter
 def async_echo_filter(bot, message, replies):
@@ -2654,7 +2739,7 @@ async def auto_load(bot, message, replies):
         try:
            for (key, value) in autochatsdb.items():
                for (inkey, invalue) in value.items():
-                   #print('Autodescarga de '+str(key)+' chat '+str(inkey))
+                   print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
                       if SYNC_ENABLED == 0 or len([i for i in unreaddb.keys() if i.startswith(str(inkey)+':')])<1:
                          if key in logindb:
