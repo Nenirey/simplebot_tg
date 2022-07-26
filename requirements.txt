@@ -18,3 +18,4 @@ pillow
 cairosvg
 dropbox
 psycopg2-binary
+markdown

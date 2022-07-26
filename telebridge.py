@@ -44,6 +44,7 @@ import zipfile
 import base64
 import psycopg2
 import html
+import markdown
 
 version = "0.2.10"
 api_id = os.getenv('API_ID')
@@ -1946,7 +1947,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           #tipo = "sticker"
                     except:
                        print('Error converting tgs file '+str(file_attach))
-                    myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    full_text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text
+                    bubble_command = comment_text+html_buttons+msg_id
+                    if len(full_text+bubble_command)>1000:
+                       bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                       html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                    else:
+                       bubble_text = full_text
+                    myreplies.add(text = bubble_text+bubble_command, filename = file_attach, viewtype = tipo, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  else:
                     #print('Archivo muy grande!')
                     if hasattr(m.document,'attributes') and m.document.attributes:
@@ -1957,7 +1965,14 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                               file_title = attr.title
                     if hasattr(m.document,'thumbs') and m.document.thumbs:
                        file_attach = await client.download_media(m.document, contacto, thumb=-1)
-                    myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\n"+str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                    full_text = fwd_text+mquote+send_by+str(text_message)+"\n"
+                    bubble_command = str(file_title)+" "+str(sizeof_fmt(m.document.size))+down_button+reactions_text+comment_text+html_buttons+msg_id
+                    if len(full_text+bubble_command)>1000:
+                       bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                       html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                    else:
+                       bubble_text = full_text
+                    myreplies.add(text = bubble_text+bubble_command, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                  no_media = False
 
               #check if message have media
@@ -1973,10 +1988,24 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     if f_size<MIN_SIZE_DOWN or (is_down and f_size<MAX_SIZE_DOWN):
                        #print('Descargando foto...')
                        file_attach = await client.download_media(m.media, contacto)
-                       myreplies.add(text = fwd_text+mquote+send_by+"\n"+str(text_message)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       full_text = fwd_text+mquote+send_by+"\n"+str(text_message)
+                       bubble_command = reactions_text+comment_text+html_buttons+msg_id
+                       if len(full_text+bubble_command)>1000:
+                          bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                          html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                       else:
+                          bubble_text = full_text
+                       myreplies.add(text = bubble_text+bubble_command, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        #print('Foto muy grande!')
-                       myreplies.add(text = fwd_text+mquote+send_by+str(text_message)+"\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                       full_text = fwd_text+mquote+send_by+str(text_message)
+                       bubble_command = "\nFoto de "+str(sizeof_fmt(f_size))+down_button+reactions_text+comment_text+html_buttons+msg_id
+                       if len(full_text+bubble_command)>1000:
+                          bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                          html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                       else:
+                          bubble_text = full_text
+                       myreplies.add(text = bubble_text+bubble_command, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     no_media = False
 
                  #check if message have media webpage
@@ -2023,15 +2052,36 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                           wurl = ''
 
                        if file_attach!= '':
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+reactions_text+comment_text+html_buttons+msg_id, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          full_text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)
+                          bubble_command = reactions_text+comment_text+html_buttons+msg_id
+                          if len(full_text+bubble_command)>1000:
+                             bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                             html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                          else:
+                             bubble_text = full_text
+                          myreplies.add(text = bubble_text+bubble_command, filename = file_attach, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                        else:
-                          myreplies.add(text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)+(down_button if f_size>0 else "")+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                          full_text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)
+                          bubble_command = (down_button if f_size>0 else "")+reactions_text+comment_text+html_buttons+msg_id
+                          if len(full_text+bubble_command)>1000:
+                             bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                             html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                          else:
+                             bubble_text = full_text
+                          myreplies.add(text = bubble_text+bubble_command, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
                     else:
                        no_media = True
 
               #send only text message
               if no_media:
-                 myreplies.add(text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message+reactions_text+comment_text+html_buttons+msg_id, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
+                 full_text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message
+                 bubble_command = reactions_text+comment_text+html_buttons+msg_id
+                 if len(full_text+bubble_command)>1000:
+                    bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
+                    html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                 else:
+                    bubble_text = full_text
+                 myreplies.add(text = bubble_text+bubble_command, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
 
               #mark message as read
               m_id = m.id
@@ -2722,7 +2772,10 @@ def create_comment_chat(bot, message, replies, payload):
     replies.add(text='Chat de comentarios creado!')
 
 def confirm_unread(bot: DeltaBot, chat_id):
-    chat_messages = bot.get_chat(chat_id).get_messages()
+    dchat = bot.get_chat(chat_id)
+    if dchat.is_mailinglist():
+       return True
+    chat_messages = dchat.get_messages()
     if len(chat_messages)<1:
        return True
     elif chat_messages[-1].get_message_info().find('\nState: Read')>0 or chat_messages[-1].get_message_info().find('\nState: Seen')>0 or chat_messages[-1].get_message_info().find('\nRead: ')>0:
