@@ -524,6 +524,16 @@ def find_register_msg(contacto, dc_id, tg_msg):
          return
    else:
       return
+def last_register_msg(contacto, dc_id):
+   if contacto in messagedb:
+      if dc_id in messagedb[contacto]:
+         for (_, value) in messagedb[contacto][dc_id].items():
+             last_id = value
+         return last_id
+      else:
+         return
+   else:
+      return
 
 def get_tg_id(chat, bot):
     f_id = bot.get(str(chat.id))
@@ -1412,6 +1422,7 @@ def async_react_button(bot, message, replies, payload):
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
     global DBXTOKEN
     global DATABASE_URL
+    global bot_addr
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
     dchat = chat_id.get_name()
@@ -1509,7 +1520,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                       if len(all_messages)>max_limit:
                          break
              else:
-                all_messages = await client.get_messages(target, limit = sin_leer)
+                last_synchro = last_register_msg(contacto, int(dc_id))
+                if last_synchro and is_auto:
+                   all_messages = await client.get_messages(target, min_id = last_synchro, limit = max(MAX_MSG_LOAD, MAX_MSG_LOAD_AUTO))
+                else:
+                   all_messages = await client.get_messages(target, limit = sin_leer)
              if payload and payload.startswith('+') and payload.lstrip('+').isnumeric() and bot.is_admin(contacto):
                 max_limit = int(payload.lstrip('+'))
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
@@ -1883,12 +1898,28 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
                  nrow = 0
                  html_buttons = '\n\n---\n'
+                 username_bot = None
                  for row in m.reply_markup.rows:
                      html_buttons += '\n'
                      ncolumn = 0
                      for b in row.buttons:
-                         if hasattr(b,'url') and b.url:
-                            html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
+                         if hasattr(b,'query') and b.query:
+                            if not username_bot:
+                               user_bot = await client(functions.users.GetFullUserRequest(id = m.peer_id.user_id))
+                               username_bot = str(user_bot.users[0].username)
+                            html_buttons += '[['+str(b.text)+'](mailto:'+bot_addr+'?body=/inline_'+username_bot+'_'+b.query.replace(' ','%20')+')] '
+                         elif hasattr(b,'url') and b.url:
+                            if not username_bot:
+                               if hasattr(m.peer_id,'user_id'):
+                                  user_bot = await client(functions.users.GetFullUserRequest(id = m.peer_id.user_id))
+                                  username_bot = str(user_bot.users[0].username)
+                                  uri_command = 'https://t.me/'+username_bot.lower()+'?start='
+                                  if str(b.url).lower().startswith(uri_command):
+                                     html_buttons += '['+str(b.text)+' /b_/start_'+str(b.url).lower().replace(uri_command,"")+'] '
+                                  else:
+                                     html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
+                            else:
+                               html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
                          else:
                             html_buttons += '['+str(b.text)+' /c_'+str(m.id)+'_'+str(nrow)+'_'+str(ncolumn)+'] '
                          ncolumn += 1
@@ -2183,8 +2214,11 @@ async def echo_filter(bot, message, replies):
     if message.is_system_message():
        return
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
-       return
+       if message.chat.is_mailinglist() or len(message.chat.get_contacts())>2:
+          return
+       else:
+          replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
+          return
     c_id = get_tg_reply(message.chat, bot)
     target = get_tg_id(message.chat, bot)
     if not target:
@@ -2196,7 +2230,11 @@ async def echo_filter(bot, message, replies):
        await client.get_dialogs()
        #prevent ghost mode
        if not c_id:
-         await client.send_read_acknowledge(target) 
+         tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
+         sin_leer = tchat.dialogs[0].unread_count
+         await client.send_read_acknowledge(target)
+       else:
+         sin_leer = 0
        mquote = ''
        t_reply = None
        t_comment = c_id
@@ -2229,34 +2267,39 @@ async def echo_filter(bot, message, replies):
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
               m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
-              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+              if sin_leer<1:
+                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
                  m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
                  for x in range(1024, len(mtext), 1024):
                      m = await client.send_message(target, mtext[x:x+1024])
-                     register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                     if sin_leer<1:
+                        register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
              else:
                 if c_id and t_reply:
                    entity, comment_to = await client._get_comment_data(target, c_id)
                    m = await client(functions.messages.SendMediaRequest(peer=entity, media=types.InputMediaUploadedDocument(file=client.upload_file(message.filename)), caption=mtext, reply_to_msg_id=t_reply))
                 else:
                    m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
-                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                   if sin_leer<1:
+                      register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
                  m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
-                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                 if sin_leer<1:
+                    register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if c_id and t_reply:
                 entity, comment_to = await client._get_comment_data(target, c_id)
                 m = await client(functions.messages.SendMessageRequest(entity, message=mtext, reply_to_msg_id=t_reply))
              else:
                 m = await client.send_message(target, mtext, reply_to = t_reply, comment_to = t_comment)
-                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                if sin_leer<1:
+                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except Exception as e:
        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
@@ -2286,7 +2329,7 @@ def async_echo_filter(bot, message, replies):
 
 async def send_cmd(bot, message, replies, payload):
     if message.get_sender_contact().addr not in logindb:
-       replies.add(text = 'Debe iniciar sesión para enviar mensajes, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
+       replies.add(text = 'Debe iniciar sesión para enviar comandos, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
 
     target = get_tg_id(message.chat, bot)
@@ -2448,7 +2491,11 @@ async def inline_cmd(bot, message, replies, payload):
                            ncolumn = 0
                            for b in row.buttons:
                                if hasattr(b,'url') and b.url:
-                                  html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
+                                  uri_command = 'https://t.me/'+inline_bot.lower()+'?start='
+                                  if str(b.url).lower().startswith(uri_command):
+                                     html_buttons += '['+str(b.text)+' /b_/start_'+str(b.url).lower().replace(uri_command,"")+'] '
+                                  else:
+                                     html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
                                else:
                                   html_buttons += '['+str(b.text)+'] '
                                ncolumn += 1
