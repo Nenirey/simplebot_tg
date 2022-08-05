@@ -73,6 +73,11 @@ global messagedb
 #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
 messagedb = {}
 
+global last_messagedb
+#{contac_addr:{dc_id:{dc_msg:tg_msg}}}
+last_messagedb = {}
+
+
 global unreaddb
 #{'dc_id:dc_msg':[contact,tg_id,tg_msg]}
 unreaddb = {}
@@ -496,6 +501,17 @@ def register_msg(contacto, dc_id, dc_msg, tg_msg):
    if dc_id not in messagedb[contacto]:
       messagedb[contacto][dc_id] = {}
    messagedb[contacto][dc_id][dc_msg] = tg_msg
+   
+def register_last_msg(contacto, dc_id, dc_msg, tg_msg):
+   global last_messagedb
+   #{contac_addr:{dc_id:{dc_msg:tg_msg}}}
+   if contacto not in last_messagedb:
+      last_messagedb[contacto] = {}
+   if dc_id not in last_messagedb[contacto]:
+      last_messagedb[contacto][dc_id] = {}
+   else:
+      last_messagedb[contacto][dc_id].clear()
+   last_messagedb[contacto][dc_id][dc_msg] = tg_msg
 
 def is_register_msg(contacto, dc_id, dc_msg):
    if contacto in messagedb:
@@ -525,9 +541,9 @@ def find_register_msg(contacto, dc_id, tg_msg):
    else:
       return
 def last_register_msg(contacto, dc_id):
-   if contacto in messagedb:
-      if dc_id in messagedb[contacto]:
-         for (_, value) in messagedb[contacto][dc_id].items():
+   if contacto in last_messagedb:
+      if dc_id in last_messagedb[contacto]:
+         for (_, value) in last_messagedb[contacto][dc_id].items():
              last_id = value
          return last_id
       else:
@@ -1426,6 +1442,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
     dchat = chat_id.get_name()
+    is_in_auto = False
     if is_auto:
        max_limit = MAX_MSG_LOAD_AUTO
        is_down = False
@@ -1438,10 +1455,12 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id, bot)
     rpto = get_tg_reply(chat_id, bot)
+    if dc_contact in autochatsdb and str(dc_id) in autochatsdb[dc_contact]:
+       is_in_auto = True
     if not target:
        myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
        myreplies.send_reply_messages()
-       if is_auto and dc_contact in autochatsdb and str(dc_id) in autochatsdb[dc_contact]:
+       if is_auto and is_in_auto:
           del autochatsdb[dc_contact][str(dc_id)]
        return
 
@@ -1481,6 +1500,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        limite = 0
        load_history = False
        show_id = False
+       load_unreads = False
        if payload and payload.lstrip('-').isnumeric():
           if payload.isnumeric():
              if rpto:
@@ -1521,10 +1541,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          break
              else:
                 last_synchro = last_register_msg(contacto, int(dc_id))
-                if last_synchro and is_auto:
+                if last_synchro:
                    all_messages = await client.get_messages(target, min_id = last_synchro, limit = max(MAX_MSG_LOAD, MAX_MSG_LOAD_AUTO))
                 else:
                    all_messages = await client.get_messages(target, limit = sin_leer)
+                load_unreads = True
              if payload and payload.startswith('+') and payload.lstrip('+').isnumeric() and bot.is_admin(contacto):
                 max_limit = int(payload.lstrip('+'))
        #print(str(contacto)+' '+str(dchat)+': '+str(len(all_messages)))
@@ -2124,11 +2145,13 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                 await m.mark_read()
               limite+=1
               register_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
+              if load_unreads:
+                 register_last_msg(contacto, int(dc_id), int(dc_msg), int(m_id))
               if file_attach!='' and os.path.exists(file_attach):
                  os.remove(file_attach)
                  remove_attach(file_attach)
            else:
-              if not load_history and not is_auto:
+              if not load_history and not is_auto and not is_in_auto:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
               break
        if SYNC_ENABLED and is_auto:
@@ -2136,7 +2159,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           if m_id>-1 and dc_msg>-1:
              unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
              #bot.set('UNREADDB',json.dumps(unreaddb))
-       if sin_leer-limite<=0 and not load_history and not is_auto:
+       if sin_leer-limite<=0 and not load_history and not is_auto and not is_in_auto:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
        if load_history:
@@ -2267,39 +2290,34 @@ async def echo_filter(bot, message, replies):
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
               m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
-              if sin_leer<1:
-                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
                  m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
                  register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
                  for x in range(1024, len(mtext), 1024):
                      m = await client.send_message(target, mtext[x:x+1024])
-                     if sin_leer<1:
-                        register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                     register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
              else:
                 if c_id and t_reply:
                    entity, comment_to = await client._get_comment_data(target, c_id)
                    m = await client(functions.messages.SendMediaRequest(peer=entity, media=types.InputMediaUploadedDocument(file=client.upload_file(message.filename)), caption=mtext, reply_to_msg_id=t_reply))
                 else:
                    m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
-                   if sin_leer<1:
-                      register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
                  m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
-                 if sin_leer<1:
-                    register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
           else:
              if c_id and t_reply:
                 entity, comment_to = await client._get_comment_data(target, c_id)
                 m = await client(functions.messages.SendMessageRequest(entity, message=mtext, reply_to_msg_id=t_reply))
              else:
                 m = await client.send_message(target, mtext, reply_to = t_reply, comment_to = t_comment)
-                if sin_leer<1:
-                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except Exception as e:
        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
@@ -2837,7 +2855,8 @@ async def auto_load(bot, message, replies):
     while True:
         #{contact_addr:{chat_id:chat_type}}
         try:
-           for (key, value) in autochatsdb.items():
+           autochats = copy.deepcopy(autochatsdb)
+           for (key, value) in autochats.items():
                for (inkey, invalue) in value.items():
                    print('Autodescarga de '+str(key)+' chat '+str(inkey))
                    try:
@@ -2859,7 +2878,7 @@ async def auto_load(bot, message, replies):
                    except Exception as e:
                       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
                       print(estr)
-                      print("Eliminando chat invalido "+autochatsdb[key][inkey])
+                      print("Eliminando chat invalido "+str(autochatsdb[key][inkey]))
                       del autochatsdb[key][inkey]
                    time.sleep(0.100)
         except:
