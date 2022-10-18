@@ -22,6 +22,7 @@ from telethon.tl.types import InputPeerEmpty, WebDocument, WebDocumentNoProxy, I
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon import utils, errors
 from telethon.errors import SessionPasswordNeededError
+from telethon import helpers
 import asyncio
 import re
 import time
@@ -45,8 +46,10 @@ import base64
 import psycopg2
 import html
 import markdown
+import random
+import string
 
-version = "0.2.10"
+version = "0.2.12"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -92,6 +95,12 @@ chatdb = {}
 global resultsdb
 #{contact_addr:results}
 resultsdb = {}
+
+global prealiasdb
+prealiasdb = {}
+
+global aliasdb
+aliasdb = {}
 
 global auto_load_task
 auto_load_task = None
@@ -237,6 +246,10 @@ def savelogin(bot):
 def saveautochats(bot):
     bot.set('AUTOCHATSDB',json.dumps(autochatsdb))
     save_bot_db()
+    
+def savealias(bot):
+    bot.set('ALIASDB',json.dumps(aliasdb))
+    save_bot_db()
 
 def fixautochats(bot):
     cids = []
@@ -313,7 +326,7 @@ class AccountPlugin:
       @account_hookimpl
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
-          if chat.is_group():
+          if chat.is_multiuser():
              save_bot_db()
 
       @account_hookimpl
@@ -338,6 +351,8 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
     """Check that the sender is not in the black or white list."""
     sender_addr = message.get_sender_contact().addr
     if white_list and sender_addr!=admin_addr and sender_addr not in white_list:
+       if message.text.lower().startswith('/pdown') or message.text.lower().startswith('/alias'):
+          return None
        print('Usuario '+str(sender_addr)+' no esta en la lista blanca')
        return True
     if black_list and sender_addr!=admin_addr and sender_addr in black_list:
@@ -345,7 +360,7 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
        return True
     #print(message)
     """
-    if message.chat.is_group():
+    if message.chat.is_multiuser():
        if get_tg_id(message.chat, bot):
           contactos = message.chat.get_contacts()
           if len(contactos)>2:
@@ -419,6 +434,7 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/logout" ,func = logout_tg)
     bot.commands.register(name = "/remove" ,func = remove_chat)
     bot.commands.register(name = "/down" ,func = async_down_chat_messages)
+    bot.commands.register(name = "/pdown" ,func = async_private_down_chat_messages)
     bot.commands.register(name = "/comment" ,func = async_comment_chat_messages)
     bot.commands.register(name = "/c" ,func = async_click_button)
     bot.commands.register(name = "/b" ,func = async_send_cmd)
@@ -437,9 +453,10 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/info" ,func = async_chat_info)
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
     bot.commands.register(name = "/react" ,func = async_react_button)
-    bot.commands.register(name = "/link2" ,func = link_to, admin = True)
+    bot.commands.register(name = "/link2" ,func = link_to)
     bot.commands.register(name = "/dbxtoken" ,func = get_dbxtoken, admin = True)
     bot.commands.register(name = "/chat" ,func = create_comment_chat)
+    bot.commands.register(name = "/alias" ,func = create_alias)
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
@@ -460,6 +477,8 @@ def deltabot_start(bot: DeltaBot) -> None:
     logindb = json.loads(bot.get('LOGINDB') or '{}')
     global autochatsdb
     autochatsdb = json.loads(bot.get('AUTOCHATSDB') or '{}')
+    global aliasdb
+    aliasdb = json.loads(bot.get('ALIASDB') or '{}')
     fixautochats(bot)
     for (key,_) in logindb.items():
         loop.run_until_complete(load_delta_chats(contacto=key))
@@ -467,6 +486,24 @@ def deltabot_start(bot: DeltaBot) -> None:
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
+def create_alias(bot, replies, message, payload):
+    """Configure your alias for anonimous Super Groups, 
+    send /alias first in private"""
+    global prealiasdb
+    global aliasdb
+    parametros = payload.split()
+    addr = message.get_sender_contact().addr
+    if len(parametros)==0 and not message.chat.is_multiuser():
+       calias = ''.join(random.choice(string.ascii_lowercase) for i in range(6))
+       prealiasdb[calias] = addr
+       replies.add('Envie /alias_'+calias+' en el super grupo anónimo donde esté el bot (mantenga presionado /alias... para copiarlo)')
+    if len(parametros)==1:
+       if parametros[0] in prealiasdb:
+          aliasdb[addr]=prealiasdb[parametros[0]]
+          savealias(bot)
+          bot.get_chat(prealiasdb[parametros[0]]).send_text('Alias '+addr+' confirmado para '+prealiasdb[parametros[0]])
+          del prealiasdb[parametros[0]]
+       
 
 def get_dbxtoken(bot, replies, message, payload):
     "Get fresh Dropbox Token (DBXTOKEN)"
@@ -480,9 +517,13 @@ def get_dbxtoken(bot, replies, message, payload):
           replies.add(text=code)
     else:
        replies.add(text='Debe colocar su APP_KEY de Dropbox en las variables de entorno, para poder generar nuevos codigos de acceso.')
-
-def hide_spoiler(s_text,offset,tlen):
-    h_text = '▚'*tlen
+    
+def parse_entiti(r_text, s_text,offset,tlen):
+    if r_text == '▚':
+       h_text = helpers.add_surrogate(r_text*tlen)
+    else:
+       spaces = " "*tlen
+       h_text = helpers.add_surrogate(r_text+spaces)
     mystring = h_text.join([s_text[:offset],s_text[offset+tlen:]])
     return mystring
 
@@ -633,15 +674,16 @@ def safe_html(hcode):
     return scode
     
 async def chat_news(bot, payload, replies, message):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ver sus chats!')
        return
-    if message.get_sender_contact().addr not in chatdb:
-       chatdb[message.get_sender_contact().addr] = {}
+    if addr not in chatdb:
+       chatdb[addr] = {}
     try:
-       if not os.path.exists(message.get_sender_contact().addr):
-          os.mkdir(message.get_sender_contact().addr)
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       if not os.path.exists(addr):
+          os.mkdir(addr)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        me = await client.get_me()
        my_id = me.id
@@ -682,7 +724,7 @@ async def chat_news(bot, payload, replies, message):
               if len(titulo)<1:
                  titulo = '?'
               profile_letter = '<div style="font-size:50px;color:white;background:#7777ff;border-radius:25px;width:50px;height:50px"><center>'+str(titulo[0])+'</center></div>'
-              if str(d.id) in chatdb[message.get_sender_contact().addr]:
+              if str(d.id) in chatdb[addr]:
                  comando = '<br><a href="mailto:'+bot_addr+'?body=/remove_'+str(d.id)+'">❌ Desvilcular</a>&nbsp; &nbsp; &nbsp;<a href="mailto:?body=/link2_'+str(d.id)+'">↔️ Vincular con...</a>'
               else:
                  comando = '<br><a href="mailto:'+bot_addr+'?body=/load_'+str(d.id)+'">✅ Cargar</a>&nbsp; &nbsp; &nbsp;<a href="mailto:?body=/link2_'+str(d.id)+'">↔️ Vincular con...</a>'
@@ -740,41 +782,49 @@ def async_chat_news(bot, payload, replies, message):
 
 def link_to(bot, payload, replies, message):
     """Link chat with a Telegram chat"""
+    if message.get_sender_contact().addr not in logindb:
+       replies.add(text = 'Debe iniciar sesión para vincular chats!')
+       return
+    if not bot.is_admin(message.get_sender_contact()) and (len(message.chat.get_contacts())>2 or message.chat.is_mailinglist()):
+       replies.add(text = 'Debe ser administrador para vincular un chat de mas de 2 miembros o un super grupo!')
+       return
     if payload:
        tchat = payload.replace('@','')
        tchat = tchat.replace(' ','_')
        bot.set(str(message.chat.id), tchat)
-       save_bot_db()
        replies.add(text='Se ha asociado el chat de Telegram '+payload+' con este chat')
     else:
        bot.set(str(message.chat.id),None)
        bot.set("rp2_"+str(message.chat.id),None)
        replies.add(text='Este chat se desvinculó de Telegram!')
+    save_bot_db()
 
 async def chat_info(bot, payload, replies, message):
     f_id = get_tg_id(message.chat, bot)
     c_id = get_tg_reply(message.chat, bot)
+    addr = message.get_sender_contact().addr
     if not f_id:
        replies.add(text = 'Este no es un chat de telegram!')
        return
-    if message.get_sender_contact().addr not in logindb:
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ver información del chat!')
        return
-    if message.get_sender_contact().addr not in chatdb:
-       chatdb[message.get_sender_contact().addr] = {}
+    if addr not in chatdb:
+       chatdb[addr] = {}
     try:
-       if not os.path.exists(message.get_sender_contact().addr):
-          os.mkdir(message.get_sender_contact().addr)
+       if not os.path.exists(addr):
+          os.mkdir(addr)
 
        if f_id:
           #TODO show more chat information
-          client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+          myreplies = Replies(bot, logger=bot.logger)
+          client = TC(StringSession(logindb[addr]), api_id, api_hash)
           await client.connect()
           await client.get_dialogs()
           tinfo =""
           img = None
           if message.quote:
-             t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+             t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
              if not t_reply:
                 replies.add(text='No se encontró la referencia de este mensaje con el de Telegram', quote=message)
              else:
@@ -814,7 +864,11 @@ async def chat_info(bot, payload, replies, message):
                    tinfo += "\nTelegram mensaje id: "+str(t_reply)
                    tinfo += "\nDeltaChat mensaje id: "+str(message.quote.id)
                    tinfo += "\nFecha de envio (UTC): "+str(mensaje[0].date)
-                   replies.add(text=tinfo, html=mensaje[0].stringify(), filename=img, quote=message)
+                   myreplies.add(text=tinfo, html=mensaje[0].stringify(), filename=img, quote=message, chat=message.chat)
+                   myreplies.send_reply_messages()
+                   if img and img!='' and os.path.exists(img):
+                      os.remove(img)
+                      remove_attach(img)
                 else:
                    replies.add(text="El mensaje fue eliminado?")
              await client.disconnect()
@@ -843,15 +897,20 @@ async def chat_info(bot, payload, replies, message):
                if hasattr(full_pchat,'user') and full_pchat.user:
                    tinfo = full_pchat.user.first_name
           try:
-             img = await client.download_profile_photo(f_id, message.get_sender_contact().addr)
+             img = await client.download_profile_photo(f_id, addr)
           except:
              img = None
              print("Error descargando foto de perfil de "+str(f_id))
           await client.disconnect()
-          replies.add(text=tinfo, html = "<code>"+str(full_pchat)+"</code>", filename = img, quote=message)
-    except:
-       code = str(sys.exc_info())
-       replies.add(text=code)
+          myreplies.add(text=tinfo, html = "<code>"+str(full_pchat)+"</code>", filename = img, quote=message, chat=message.chat)
+          myreplies.send_reply_messages()
+          if img and img!='' and os.path.exists(img):
+             os.remove(img)
+             remove_attach(img)
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       print(estr)
+       replies.add(text=estr)
 
 def async_chat_info(bot, payload, replies, message):
     """Show message information from telegram. Example: reply a message with /info"""
@@ -865,10 +924,11 @@ async def pin_messages(bot, message, replies):
     if not f_id:
        replies.add(text = "Este no es un chat de telegram!")
        return
+    addr = message.get_sender_contact().addr
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
-       t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+       t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
        if t_reply:
           await client.pin_message(f_id, t_reply)
           replies.add(text = 'Mensaje fijado!')
@@ -889,7 +949,8 @@ def async_pin_messages(bot, message, replies):
 
 
 async def forward_message(bot, message, replies, payload):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para reenviar mensajes!')
        return
     f_id = get_tg_id(message.chat, bot)
@@ -914,7 +975,7 @@ async def forward_message(bot, message, replies, payload):
        return
     try:
        #replies.add(text='Reanviando mensaje... '+str(m_id)+' a '+str(d_id)+' de '+str(f_id))
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        await client.forward_messages(d_id, m_id, f_id)
@@ -935,20 +996,22 @@ def async_forward_message(bot, message, replies, payload):
 
 def list_chats(replies, message, payload):
     """Show your linked deltachat/telegram chats. Example /list"""
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para listar sus chats!')
        return
-    if message.get_sender_contact().addr not in chatdb:
-       chatdb[message.get_sender_contact().addr] = {}
+    if addr not in chatdb:
+       chatdb[addr] = {}
     chat_list = ''
-    for (key, value) in chatdb[message.get_sender_contact().addr].items():
+    for (key, value) in chatdb[addr].items():
         chat_list+='\n\n'+value+'\n❌ Desvincular: /remove_'+key
     replies.add(text = chat_list)
 
 async def add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     alloweddb ={'deltachat2':''}
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para automatizar chats')
        return
     target = get_tg_id(message.chat, bot)
@@ -956,7 +1019,7 @@ async def add_auto_chats(bot, replies, message):
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        is_channel = False
@@ -978,24 +1041,24 @@ async def add_auto_chats(bot, replies, message):
        print(code)
        replies.add(text = code)
        return
-    if message.get_sender_contact().addr in chatdb:
+    if addr in chatdb:
        if is_channel or is_user or is_allowed or bot.is_admin(message.get_sender_contact()):
           #{contact_addr:{chat_id:chat_type}}
-          if message.get_sender_contact().addr not in autochatsdb:
-             autochatsdb[message.get_sender_contact().addr]={}
-          if str(message.chat.id) in autochatsdb[message.get_sender_contact().addr]:
-             del autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]
-             replies.add(text='Se ha desactivado la automatizacion en este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
+          if addr not in autochatsdb:
+             autochatsdb[addr]={}
+          if str(message.chat.id) in autochatsdb[addr]:
+             del autochatsdb[addr][str(message.chat.id)]
+             replies.add(text='Se ha desactivado la automatizacion en este chat ('+str(len(autochatsdb[addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
           else:
-             if len(autochatsdb[message.get_sender_contact().addr])>=MAX_AUTO_CHATS and not bot.is_admin(message.get_sender_contact()):
-                autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
-                for (key,_) in autochatsdb[message.get_sender_contact().addr].items():
-                    del autochatsdb[message.get_sender_contact().addr][str(key)]
-                    replies.add(text='Solo se permiten automatizar hasta 5 chats, se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
+             if len(autochatsdb[addr])>=MAX_AUTO_CHATS and not bot.is_admin(message.get_sender_contact()):
+                autochatsdb[addr][str(message.chat.id)]=target
+                for (key,_) in autochatsdb[addr].items():
+                    del autochatsdb[addr][str(key)]
+                    replies.add(text='Solo se permiten automatizar hasta 5 chats, se ha automatizado este chat ('+str(len(autochatsdb[addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer y se ha desactivado la automatizacion del chat '+str(bot.get_chat(int(key)).get_name()))
                     break
              else:
                 autochatsdb[message.get_sender_contact().addr][str(message.chat.id)]=target
-                replies.add(text='Se ha automatizado este chat ('+str(len(autochatsdb[message.get_sender_contact().addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
+                replies.add(text='Se ha automatizado este chat ('+str(len(autochatsdb[addr]))+' de '+str(MAX_AUTO_CHATS)+'), tiene '+str(sin_leer)+' mensajes sin leer!')
        else:
           replies.add(text='Solo se permite automatizar chats privados, canales y algunos grupos permitidos por ahora')
     else:
@@ -1012,17 +1075,18 @@ def async_add_auto_chats(bot, replies, message):
 async def save_delta_chats(replies, message):
     """This is for save the chats deltachat/telegram in Telegram Saved message user"""
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
-       tf = open(message.get_sender_contact().addr+'.json', 'w')
-       json.dump(chatdb[message.get_sender_contact().addr], tf)
+       addr = message.get_sender_contact().addr
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
+       tf = open(addr+'.json', 'w')
+       json.dump(chatdb[addr], tf)
        tf.close()
        await client.connect()
        my_id = await client(functions.users.GetFullUserRequest('me'))
        if my_id.full_user.pinned_msg_id:
           my_pin = await client.get_messages('me', ids=my_id.full_user.pinned_msg_id)
-          await client.edit_message('me',my_pin,'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = message.get_sender_contact().addr+'.json')
+          await client.edit_message('me',my_pin,'!!!Atención, este mensaje es parte del puente con deltachat, NO lo borre ni lo quite de los anclados o perdera el vinculo con telegram\n'+str(datetime.now()), file = addr+'.json')
        else:
-          my_new_pin = await client.send_file('me', message.get_sender_contact().addr+'.json')
+          my_new_pin = await client.send_file('me', addr+'.json')
           await client.pin_message('me', my_new_pin)
        await client.disconnect()
     except:
@@ -1047,12 +1111,12 @@ async def load_delta_chats(contacto, replies = None):
        my_id = await client(functions.users.GetFullUserRequest('me'))
        if hasattr(my_id.full_user,'pinned_msg_id') and my_id.full_user.pinned_msg_id:
           my_pin = await client.get_messages('me', ids=my_id.full_user.pinned_msg_id)
-          await client.download_media(my_pin)
-          if os.path.isfile(contacto+'.json'):
-             tf = open(contacto+'.json','r')
+          json_file = await client.download_media(my_pin)
+          if os.path.isfile(json_file):
+             tf = open(json_file,'r')
              chatdb[contacto]=json.load(tf)
              tf.close()
-             os.remove(contacto+'.json')
+             os.remove(json_file)
        else:
           print('No pinned message!')
        await client.disconnect()
@@ -1071,7 +1135,8 @@ def remove_chat(bot, payload, replies, message):
     target = None
     self_target = get_tg_id(message.chat, bot)
     rpto = get_tg_reply(message.chat, bot)
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para eliminar chats!')
        return
     if not payload or payload =='':
@@ -1081,27 +1146,27 @@ def remove_chat(bot, payload, replies, message):
        target = payload.replace(' ','_')
     any_target = target or self_target
     if target == 'all':
-       if message.get_sender_contact().addr in chatdb:
-          chatdb[message.get_sender_contact().addr].clear()
-       if message.get_sender_contact().addr in autochatsdb:
-          autochatsdb[message.get_sender_contact().addr].clear()
+       if addr in chatdb:
+          chatdb[addr].clear()
+       if addr in autochatsdb:
+          autochatsdb[addr].clear()
        replies.add(text = 'Se desvincularon todos sus chats de telegram.')
     else:
        if self_target and not target:
           bot.set(str(message.chat.id),None)
           if rpto:
              bot.set("rp2_"+str(message.chat.id),None)
-       if str(any_target) in chatdb[message.get_sender_contact().addr]:
-          c_title = chatdb[message.get_sender_contact().addr][str(any_target)]
-          del chatdb[message.get_sender_contact().addr][str(any_target)]
+       if str(any_target) in chatdb[addr]:
+          c_title = chatdb[addr][str(any_target)]
+          del chatdb[addr][str(any_target)]
           replies.add(text = 'Se desvinculó el chat delta '+str(c_title)+' con el chat telegram '+str(any_target))
        else:
           replies.add(text = 'Este chat no está vinculado a telegram')
        try:
-          if message.get_sender_contact().addr in autochatsdb:
-             for (key, value) in autochatsdb[message.get_sender_contact().addr].items():
+          if addr in autochatsdb:
+             for (key, value) in autochatsdb[addr].items():
                  if str(value) == str(target) or (target is None and str(key) == str(message.chat.id)):
-                    del autochatsdb[message.get_sender_contact().addr][str(key)]
+                    del autochatsdb[addr][str(key)]
                     replies.add(text = 'Se desactivaron las actualizaciones para el chat '+bot.get_chat(int(key)).get_name())
                     break
        except:
@@ -1111,12 +1176,13 @@ def remove_chat(bot, payload, replies, message):
 
 def logout_tg(bot, payload, replies, message):
     """Logout from Telegram and delete the token session for the bot"""
-    if message.get_sender_contact().addr in logindb:
-       del logindb[message.get_sender_contact().addr]
-       if message.get_sender_contact().addr in clientdb:
-          del clientdb[message.get_sender_contact().addr]
-       if message.get_sender_contact().addr in autochatsdb:
-          autochatsdb[message.get_sender_contact().addr].clear()
+    addr = message.get_sender_contact().addr
+    if addr in logindb:
+       del logindb[addr]
+       if addr in clientdb:
+          del clientdb[addr]
+       if addr in autochatsdb:
+          autochatsdb[addr].clear()
        savelogin(bot)
        replies.add(text = 'Se ha cerrado la sesión en telegram, puede usar su token para iniciar en cualquier momento pero a nosotros se nos ha olvidado')
     else:
@@ -1124,7 +1190,7 @@ def logout_tg(bot, payload, replies, message):
 
 async def login_num(payload, replies, message):
     try:
-       if message.chat.is_group():
+       if message.chat.is_multiuser():
           return
        forzar_sms = False
        parametros = payload.split()
@@ -1137,16 +1203,17 @@ async def login_num(payload, replies, message):
              return
           else:
              forzar_sms = True
-       clientdb[message.get_sender_contact().addr] = TC(StringSession(), api_id, api_hash)
-       await clientdb[message.get_sender_contact().addr].connect()
+       addr = message.get_sender_contact().addr
+       clientdb[addr] = TC(StringSession(), api_id, api_hash)
+       await clientdb[addr].connect()
        try:
-          me = await clientdb[message.get_sender_contact().addr].send_code_request(parametros[0], force_sms = forzar_sms)
+          me = await clientdb[addr].send_code_request(parametros[0], force_sms = forzar_sms)
        except errors.FloodWaitError as e:
           print(e)
           replies.add(text = 'Atencion!\nHa solicitado demasiadas veces el codigo y Telegram le ha penalizado con '+str(e.seconds)+' segundos de espera para poder solicitar nuevamente el codigo!')
           return
-       hashdb[message.get_sender_contact().addr] = me.phone_code_hash
-       phonedb[message.get_sender_contact().addr] = parametros[0]
+       hashdb[addr] = me.phone_code_hash
+       phonedb[addr] = parametros[0]
        replies.add(text = 'Se ha enviado un codigo de confirmacion al numero '+parametros[0]+', puede que le llegue a su cliente de Telegram o reciba una llamada, por favor introdusca /sms CODIGO para iniciar')
     except:
        code = str(sys.exc_info())
@@ -1160,19 +1227,20 @@ def async_login_num(payload, replies, message):
 
 async def login_code(bot, payload, replies, message):
     try:
-       if message.chat.is_group():
+       if message.chat.is_multiuser():
           return
-       if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb:
+       addr = message.get_sender_contact().addr
+       if addr in phonedb and addr in hashdb and addr in clientdb:
           try:
-              me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], phone_code_hash=hashdb[message.get_sender_contact().addr], code=payload)
-              logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+              me = await clientdb[addr].sign_in(phone=phonedb[addr], phone_code_hash=hashdb[addr], code=payload)
+              logindb[addr]=clientdb[addr].session.save()
               savelogin(bot)
               replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
-              replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
-              await clientdb[message.get_sender_contact().addr].disconnect()
-              del clientdb[message.get_sender_contact().addr]
+              replies.add(text = '/token '+logindb[addr])
+              await clientdb[addr].disconnect()
+              del clientdb[addr]
           except SessionPasswordNeededError:
-              smsdb[message.get_sender_contact().addr]=payload
+              smsdb[addr]=payload
               replies.add(text = 'Tiene habilitada la autentificacion de doble factor, por favor introdusca /pass PASSWORD para completar el login.')
        else:
           replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
@@ -1190,22 +1258,23 @@ def async_login_code(bot, payload, replies, message):
 
 async def login_2fa(bot, payload, replies, message):
     try:
-       if message.chat.is_group():
+       if message.chat.is_multiuser():
           return
-       if message.get_sender_contact().addr in phonedb and message.get_sender_contact().addr in hashdb and message.get_sender_contact().addr in clientdb and message.get_sender_contact().addr in smsdb:
-          me = await clientdb[message.get_sender_contact().addr].sign_in(phone=phonedb[message.get_sender_contact().addr], password=payload)
-          logindb[message.get_sender_contact().addr]=clientdb[message.get_sender_contact().addr].session.save()
+       addr = message.get_sender_contact().addr
+       if addr in phonedb and addr in hashdb and addr in clientdb and addr in smsdb:
+          me = await clientdb[addr].sign_in(phone=phonedb[addr], password=payload)
+          logindb[addr]=clientdb[addr].session.save()
           savelogin(bot)
           replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
-          replies.add(text = '/token '+logindb[message.get_sender_contact().addr])
-          await clientdb[message.get_sender_contact().addr].disconnect()
-          del clientdb[message.get_sender_contact().addr]
-          del smsdb[message.get_sender_contact().addr]
+          replies.add(text = '/token '+logindb[addr])
+          await clientdb[addr].disconnect()
+          del clientdb[addr]
+          del smsdb[addr]
        else:
-          if message.get_sender_contact().addr not in clientdb:
+          if addr not in clientdb:
              replies.add(text = 'Debe introducir primero si numero de movil con /login NUMERO')
           else:
-             if message.get_sender_contact().addr not in smsdb:
+             if addr not in smsdb:
                 replies.add(text = 'Debe introducir primero el sms que le ha sido enviado con /sms CODIGO')
     except:
        code = str(sys.exc_info())
@@ -1220,9 +1289,10 @@ def async_login_2fa(bot, payload, replies, message):
        async_load_delta_chats(message = message, replies = replies)
 
 async def login_session(bot, payload, replies, message):
-    if message.chat.is_group():
+    if message.chat.is_multiuser():
        return
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        try:
            hash = payload.replace(' ','_')
            client = TC(StringSession(hash), api_id, api_hash)
@@ -1238,7 +1308,7 @@ async def login_session(bot, payload, replies, message):
               last_name= ""
            nombre= (first_name + ' ' + last_name).strip()
            await client.disconnect()
-           logindb[message.get_sender_contact().addr] = hash
+           logindb[addr] = hash
            savelogin(bot)
            replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
        except:
@@ -1246,7 +1316,7 @@ async def login_session(bot, payload, replies, message):
           print(code)
           replies.add(text='Error al iniciar sessión:\n'+code)
     else:
-       replies.add(text='Su token es:\n\n'+logindb[message.get_sender_contact().addr])
+       replies.add(text='Su token es:\n\n'+logindb[addr])
 
 def async_login_session(bot, payload, replies, message):
     """Start session using your token or show it if already login. Example: /token abigtexthashloginusingintelethonlibrary..."""
@@ -1257,16 +1327,17 @@ def async_login_session(bot, payload, replies, message):
 async def updater(bot, payload, replies, message):
     global DBXTOKEN
     global DATABASE_URL
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
        return
-    if message.get_sender_contact().addr not in chatdb:
-       chatdb[message.get_sender_contact().addr] = {}
+    if addr not in chatdb:
+       chatdb[addr] = {}
     try:
-       if not os.path.exists(message.get_sender_contact().addr):
-          os.mkdir(message.get_sender_contact().addr)
+       if not os.path.exists(addr):
+          os.mkdir(addr)
        contacto = message.get_sender_contact()
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        me = await client.get_me()
        my_id = me.id
@@ -1295,7 +1366,7 @@ async def updater(bot, payload, replies, message):
                  find_only = False
               else:
                  find_only = True
-           if str(d.id) not in chatdb[message.get_sender_contact().addr] and not private_only and not find_only:
+           if str(d.id) not in chatdb[addr] and not private_only and not find_only:
               if DBXTOKEN or DATABASE_URL:
                  titulo = str(ttitle)
                  if my_id == d.id:
@@ -1305,14 +1376,15 @@ async def updater(bot, payload, replies, message):
                  if my_id == d.id:
                     titulo = 'Mensajes guardados ['+str(d.id)+']'
               chat_id = bot.create_group(titulo, [contacto])
-              img = await client.download_profile_photo(d.entity, message.get_sender_contact().addr)
+              img = await client.download_profile_photo(d.entity, addr)
               try:
                  if img and os.path.exists(img):
                     chat_id.set_profile_image(img)
+                    os.remove(img)
               except:
                  print('Error al poner foto del perfil al chat:\n'+str(img))
               chats_limit-=1
-              chatdb[message.get_sender_contact().addr][str(d.id)] = str(chat_id.get_name())
+              chatdb[addr][str(d.id)] = str(chat_id.get_name())
               if d.unread_count == 0:
                  replies.add(text = "Estas al día con "+ttitle+" id:[`"+str(d.id)+"`]\n/more", chat = chat_id)
               else:
@@ -1321,7 +1393,7 @@ async def updater(bot, payload, replies, message):
               if chats_limit<=0:
                  break
            else:
-              if str(d.id) in chatdb[message.get_sender_contact().addr]:
+              if str(d.id) in chatdb[addr]:
                  ya_agregados += '\n'+str(ttitle)+' /remove_'+str(d.id)
        await client.disconnect()
        if ya_agregados!='':
@@ -1342,7 +1414,8 @@ def async_updater(bot, payload, replies, message):
 
 async def click_button(bot, message, replies, payload):
     parametros = payload.split()
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión usar los botones!')
        return
     if len(parametros)<2:
@@ -1353,7 +1426,7 @@ async def click_button(bot, message, replies, payload):
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        all_messages = await client.get_messages(target, ids = [int(parametros[0])])
@@ -1377,20 +1450,25 @@ def async_click_button(bot, message, replies, payload):
 
 async def react_button(bot, message, replies, payload):
     parametros = payload.split()
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para reaccionar!')
        return
     if message.quote:
-       t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
-       if not t_reply:
-          replies.add(text = 'No se encontro la referencia de este mensaje!')
-          return
+       t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
+    elif len(parametros)>1 and parametros[0].isnumeric():
+       t_reply = int(parametros[0])
+    else:
+       t_reply = False
+    if not t_reply and len(parametros)>0:
+       replies.add(text = 'No se encontro la referencia de este mensaje!')
+       return
     target = get_tg_id(message.chat, bot)
     if not target:
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        if len(parametros)<1:
@@ -1421,8 +1499,7 @@ async def react_button(bot, message, replies, payload):
                  text_reactions+=r.reaction
              replies.add(text = "Reacciones disponibles en este chat:\n\n"+text_reactions)
        else:
-          await client(functions.messages.SendReactionRequest(peer=target, msg_id=t_reply, reaction=parametros[0]))
-          #await client.send_reaction(target,t_reply,parametros[0])
+          await client(functions.messages.SendReactionRequest(peer=target, msg_id=t_reply, reaction=parametros[-1]))
        await client.disconnect()
     except:
        code = str(sys.exc_info())
@@ -1431,8 +1508,9 @@ async def react_button(bot, message, replies, payload):
 def async_react_button(bot, message, replies, payload):
     """Send reaction to message repling it like: /react ❤"""
     loop.run_until_complete(react_button(bot = bot, message = message, replies = replies, payload = payload))
-    t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
-    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=str(t_reply), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+    addr = message.get_sender_contact().addr
+    t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
+    loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=str(t_reply), dc_contact = addr, dc_id = message.chat.id, is_auto = False))
 
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
@@ -1447,15 +1525,30 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        max_limit = MAX_MSG_LOAD_AUTO
        is_down = False
        is_comment = False
+       is_pdown = False
     else:
        max_limit = MAX_MSG_LOAD
-       is_down = message.text.lower().startswith('/down')
+       is_down = message.text.lower().startswith('/down') 
        is_comment = message.text.lower().startswith('/comment')
+       is_pdown = message.text.lower().startswith('/pdown')
     
     myreplies = Replies(bot, logger=bot.logger)
     target = get_tg_id(chat_id, bot)
     rpto = get_tg_reply(chat_id, bot)
-    if dc_contact in autochatsdb and str(dc_id) in autochatsdb[dc_contact]:
+    if is_pdown:
+       addr = message.get_sender_contact().addr
+       is_down = True
+       if addr in aliasdb:
+          chat_id = bot.get_chat(aliasdb[addr])
+       else:
+          chat_id = bot.get_chat(addr)
+       if admin_addr in logindb:
+          contacto = admin_addr
+       else:
+          myreplies.add("El administrador del bot debe estar logueado para las descargas privadas", chat = chat_id)
+          return
+        
+    if contacto in autochatsdb and str(dc_id) in autochatsdb[contacto]:
        is_in_auto = True
     if not target:
        myreplies.add(text = 'Este no es un chat de telegram!', chat = chat_id)
@@ -1469,8 +1562,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        myreplies.send_reply_messages()
        return
 
-    if not os.path.exists(contacto):
-       os.mkdir(contacto)
+    if not os.path.exists(dc_contact):
+       os.mkdir(dc_contact)
 
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=not is_auto, retry_delay = 16)
@@ -1580,7 +1673,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               reactions_text = ''
               comment_text = ''
               sender_name = None
-              down_button = "\n⬇ /down_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot\n⏩ /forward_"+str(m.id)+"_karurosagu_mail_bot"
+              down_button = "\n⬇ /down_"+str(m.id)+"\n🔽 /pdown_"+str(m.id)+"\n⏩ /forward_"+str(m.id)+"_tg_file_link_bot\n⏩ /forward_"+str(m.id)+"_DirectLinkGeneratorbot"
               if show_id:
                  msg_id = '\n'+str(m.id)
 
@@ -1590,14 +1683,22 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               else:
                  text_message = ''
 
-              #check if message has spoiler text
+              #check if message has spoiler text or custom emojis
               if hasattr(m, 'entities') and m.entities:
-                 for ent in m.entities:
-                     ent_type_str = str(ent)
-                     if ent_type_str.find('MessageEntitySpoiler')>=0:
-                        html_spoiler = text_message
-                        text_message = hide_spoiler(m.message, ent.offset, ent.length)
-                        break
+                 text_tmp = helpers.add_surrogate(m.raw_text)
+                 for ent in reversed(m.entities):
+                     if isinstance(ent, types.MessageEntitySpoiler):
+                        if not html_spoiler:
+                           html_spoiler = helpers.add_surrogate(m.raw_text)
+                        text_tmp = parse_entiti('▚',text_tmp, ent.offset, ent.length)
+                        text_message = markdown.markdown(helpers.del_surrogate(text_tmp))
+                     if isinstance(ent, types.MessageEntityCustomEmoji):
+                        if not html_spoiler:
+                           html_spoiler = helpers.add_surrogate(m.raw_text)
+                        cemoji = await client(functions.messages.GetCustomEmojiDocumentsRequest( document_id=[ent.document_id] ))
+                        html_spoiler = parse_entiti('<img src="data:'+str(cemoji[0].mime_type)+';base64,{}" alt="{}" style="width:12px;height:12px"/>'.format(base64.b64encode(await client.download_media(cemoji[0],bytes)).decode(),'i'),html_spoiler,ent.offset,ent.length)
+                     if html_spoiler:
+                        html_spoiler = markdown.markdown(helpers.del_surrogate(html_spoiler))
 
               #check if message have web preview
               if hasattr(m,'web_preview') and m.web_preview and hasattr(m.web_preview,'cached_page') and m.web_preview.cached_page:
@@ -1854,7 +1955,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                              for ent in mensaje[0].entities:
                                  ent_type_str = str(ent)
                                  if ent_type_str.find('MessageEntitySpoiler')>=0:
-                                    reply_msg = hide_spoiler(reply_msg, ent.offset, ent.length)
+                                    reply_msg = parse_entiti('▚',reply_msg, ent.offset, ent.length)
                                     break
                           reply_text += reply_msg
                           if len(reply_text)>60:
@@ -1876,12 +1977,20 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     mservice += '_Se creo el grupo/canal_\n'
                  elif isinstance(m.action, types.MessageActionPhoneCall):
                     mservice += '_📞Llamada_\n'
+                 elif isinstance(m.action, types.MessageActionGroupCall):
+                    if m.action.duration:
+                       mservice += '_📞Llamada de grupo finalizada_\n'
+                    else:
+                       mservice += '_📞Llamada de grupo iniciada_\n'
+                 elif isinstance(m.action, types.MessageActionGroupCallScheduled):
+                    mservice += '_📞Llamada de grupo programada para '+str(m.action.schedule_date)+'_\n'
                  elif isinstance(m.action, types.MessageActionChatEditPhoto):
                     mservice += '_Foto del grupo/canal cambiada_\n'
                     try:
                        if len(chat_id.get_contacts())<3 or (contacto in chatdb and str(target) in chatdb[contacto]):
                           profile_photo = await client.download_profile_photo(target, contacto)
                           chat_id.set_profile_image(profile_photo)
+                          os.remove(profile_photo)
                     except:
                        print('Error actualizando photo de perfil')
 
@@ -1920,6 +2029,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  nrow = 0
                  html_buttons = '\n\n---\n'
                  username_bot = None
+                 uri_command = 'None'
                  for row in m.reply_markup.rows:
                      html_buttons += '\n'
                      ncolumn = 0
@@ -1935,10 +2045,9 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                   user_bot = await client(functions.users.GetFullUserRequest(id = m.peer_id.user_id))
                                   username_bot = str(user_bot.users[0].username)
                                   uri_command = 'https://t.me/'+username_bot.lower()+'?start='
-                                  if str(b.url).lower().startswith(uri_command):
-                                     html_buttons += '['+str(b.text)+' /b_/start_'+str(b.url).lower().replace(uri_command,"")+'] '
-                                  else:
-                                     html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
+                            
+                            if str(b.url).lower().startswith(uri_command):
+                               html_buttons += '['+str(b.text)+' /b_/start_'+str(b.url).lower().replace(uri_command,"")+'] '
                             else:
                                html_buttons += '[['+str(b.text)+']('+str(b.url)+')] '
                          else:
@@ -2151,7 +2260,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  os.remove(file_attach)
                  remove_attach(file_attach)
            else:
-              if not load_history and not is_auto and not is_in_auto:
+              if not load_history and not is_auto and not is_in_auto and not is_pdown:
                  myreplies.add(text = "Tienes "+str(sin_leer-limite)+" mensajes sin leer de "+str(ttitle)+"\n➕ /more", chat = chat_id)
               break
        if SYNC_ENABLED and is_auto:
@@ -2159,10 +2268,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
           if m_id>-1 and dc_msg>-1:
              unreaddb[str(dc_id)+':'+str(dc_msg)]=[contacto,target,m_id]
              #bot.set('UNREADDB',json.dumps(unreaddb))
-       if sin_leer-limite<=0 and not load_history and not is_auto and not is_in_auto:
+       if sin_leer-limite<=0 and not load_history and not is_auto and not is_in_auto and not is_pdown:
           myreplies.add(text = "Estas al día con "+str(ttitle)+"\n➕ /more", chat = chat_id)
 
-       if load_history:
+       if load_history and not is_pdown:
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
        if DBXTOKEN or DATABASE_URL:
@@ -2195,6 +2304,16 @@ def async_down_chat_messages(bot, message, replies, payload):
     Download message from #10: /down -10
     Download last message in the chat: /down last"""
     loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
+    
+def async_private_down_chat_messages(bot, message, replies, payload):
+    """Download messages files from telegram to private chat
+    using an existing admin login account,
+    you can add specific message id to download one message
+    or with - sign download messages from this id number. Examples:
+    Download message #5: /pdown 5
+    Download message from #10: /pdown -10
+    Download last message in the chat: /pdown last"""
+    loop.run_until_complete(load_chat_messages(bot=bot, message=message, replies=Replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False))
 
 def async_comment_chat_messages(bot, message, replies, payload):
     """Show comments messages from telegram in a channel post or make a direct comment,
@@ -2212,7 +2331,8 @@ def async_comment_chat_messages(bot, message, replies, payload):
 
 async def direct_comment(bot, message, replies, payload):
     """Write direct in chat to write a telegram chat"""
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar comentarios, use los comandos:\n/login +CODIGOPAISNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
     c_id = get_tg_reply(message.chat, bot)
@@ -2223,7 +2343,7 @@ async def direct_comment(bot, message, replies, payload):
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        await client.send_message(target, comentario, comment_to = int(parametros[0]))
@@ -2236,7 +2356,8 @@ async def echo_filter(bot, message, replies):
     """Write direct in chat to write a telegram chat"""
     if message.is_system_message():
        return
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        if message.chat.is_mailinglist() or len(message.chat.get_contacts())>2:
           return
        else:
@@ -2248,7 +2369,7 @@ async def echo_filter(bot, message, replies):
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        #prevent ghost mode
@@ -2262,7 +2383,7 @@ async def echo_filter(bot, message, replies):
        t_reply = None
        t_comment = c_id
        if message.quote: 
-          t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+          t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
           if t_reply:
              t_message = await client.get_messages(target,ids=[t_reply])
              if t_message and hasattr(t_message[0],'post') and t_message[0].post:
@@ -2290,34 +2411,34 @@ async def echo_filter(bot, message, replies):
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
               m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
-              register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+              register_msg(addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
                  m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
-                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                 register_msg(addr, message.chat.id, message.id, m.id)
                  for x in range(1024, len(mtext), 1024):
                      m = await client.send_message(target, mtext[x:x+1024])
-                     register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                     register_msg(addr, message.chat.id, message.id, m.id)
              else:
                 if c_id and t_reply:
                    entity, comment_to = await client._get_comment_data(target, c_id)
                    m = await client(functions.messages.SendMediaRequest(peer=entity, media=types.InputMediaUploadedDocument(file=client.upload_file(message.filename)), caption=mtext, reply_to_msg_id=t_reply))
                 else:
                    m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
-                   register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                   register_msg(addr, message.chat.id, message.id, m.id)
           remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
                  m = await client.send_message(target, mtext[x:x+4096], reply_to = t_reply, comment_to = t_comment)
-                 register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                 register_msg(addr, message.chat.id, message.id, m.id)
           else:
              if c_id and t_reply:
                 entity, comment_to = await client._get_comment_data(target, c_id)
                 m = await client(functions.messages.SendMessageRequest(entity, message=mtext, reply_to_msg_id=t_reply))
              else:
                 m = await client.send_message(target, mtext, reply_to = t_reply, comment_to = t_comment)
-                register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+                register_msg(addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except Exception as e:
        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
@@ -2335,7 +2456,7 @@ async def echo_filter(bot, message, replies):
 def async_echo_filter(bot, message, replies):
     """Write direct in chat bridge to write to telegram chat"""
     global authorize_url
-    if authorize_url and not message.chat.is_group():
+    if authorize_url and not message.chat.is_multiuser():
        try:
           oauth_result = auth_flow.finish(message.text)
           replies.add(text='Se ha generado un nuevo codigo de acceso valido, copielo y sustituya DBXTOKEN por el mismo:\n\n'+oauth_result.refresh_token)
@@ -2346,7 +2467,8 @@ def async_echo_filter(bot, message, replies):
     loop.run_until_complete(echo_filter(bot, message, replies))
 
 async def send_cmd(bot, message, replies, payload):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para enviar comandos, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
 
@@ -2355,14 +2477,14 @@ async def send_cmd(bot, message, replies, payload):
        replies.add(text = 'Este no es un chat de telegram!')
        return
     try:
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        t_reply = None
        m = None
        tinfo = 'Comandos disponibles:'
        if message.quote:
-          t_reply = is_register_msg(message.get_sender_contact().addr, message.chat.id, message.quote.id)
+          t_reply = is_register_msg(addr, message.chat.id, message.quote.id)
        if message.filename:
           if message.filename.find('.aac')>0:
              m = await client.send_file(target, message.filename, caption = payload, voice_note=True, reply_to=t_reply)
@@ -2400,7 +2522,7 @@ async def send_cmd(bot, message, replies, payload):
                             tinfo += "\n/b_/"+str(cmd.command)+" "+str(cmd.description)
              replies.add(text=tinfo)
        if m:
-          register_msg(message.get_sender_contact().addr, message.chat.id, message.id, m.id)
+          register_msg(addr, message.chat.id, message.id, m.id)
        await client.disconnect()
     except:
        await client(SendMessageRequest(target, payload))
@@ -2452,7 +2574,7 @@ async def inline_cmd(bot, message, replies, payload):
           if contacto in resultsdb:
              results = []
              mensa = await resultsdb[contacto][int(parametros[0])].click()
-             await load_chat_messages(bot = bot, message=message, replies=replies, payload=str(mensa.id), dc_contact = message.get_sender_contact().addr, dc_id = message.chat.id, is_auto = False)
+             await load_chat_messages(bot = bot, message=message, replies=replies, payload=str(mensa.id), dc_contact = contacto, dc_id = message.chat.id, is_auto = False)
              return
           else:
              replies.add('Debe realizar la consulta para poderla enviar')
@@ -2485,6 +2607,7 @@ async def inline_cmd(bot, message, replies, payload):
           replies.add('La busqueda no arrojó ningun resultado.')
           #await client.disconnect()
           return
+       myreplies = Replies(bot, logger=bot.logger)
        for r in results:
            attach = ''
            resultado = ''
@@ -2519,7 +2642,7 @@ async def inline_cmd(bot, message, replies, payload):
                                ncolumn += 1
                            html_buttons += '\n'
                            nrow += 1
-                    replies.add(text = resultado+html_buttons+'\n\n/inclick_'+str(limite+offset))
+                    myreplies.add(text = resultado+html_buttons+'\n\n/inclick_'+str(limite+offset), chat=message.chat)
               if hasattr(r,'message') and r.message:
                  if r.message.message:
                     resultado+=str(r.message.message)+'\n'
@@ -2552,7 +2675,7 @@ async def inline_cmd(bot, message, replies, payload):
                              #tipo = 'sticker'
                        except:
                           print('error convirtiendo sticker')
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                        tipo = None
                  except:
                     print('Error descargando inline document result')
@@ -2569,37 +2692,41 @@ async def inline_cmd(bot, message, replies, payload):
                           attach = await clientdb[contacto].download_media(r.photo, contacto)
                        else:
                           resultado += "Foto de "+str(sizeof_fmt(f_size))+"\n\n⬇ /indown_"+str(limite+offset)
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                  except:
                     print('Error descargando inline photo result')
                  try:
                     if hasattr(r,'gif') and r.gif:
                        print('Descargando gif...')
                        attach = await clientdb[contacto].download_media(r.gif, contacto)
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                  except:
                     print('Error descargando inline gif result')
                  try:
                     if hasattr(r,'video') and r.video:
                        print('Descargando video...')
                        attach = await clientdb[contacto].download_media(r.video, contacto)
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                  except:
                     print('Error descargando inline video result')
                  try:
                     if hasattr(r,'mpeg4_gif') and r.mpeg4_gif:
                        print('Descargando mpeg4_gif...')
                        attach = await clientdb[contacto].download_media(r.mpeg4_gif, contacto)
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                  except:
                     print('Error descargando inline mpeg4_gif result')
                  try:
                     if hasattr(r,'audio') and r.audio:
                        print('Descargando audio...')
                        attach = await clientdb[contacto].download_media(r.audio, contacto)
-                       replies.add(text = resultado, filename=attach, viewtype=tipo)
+                       myreplies.add(text = resultado, filename=attach, viewtype=tipo, chat=message.chat)
                  except:
                     print('Error descargando inline audio result')
+                 myreplies.send_reply_messages()
+                 if attach!='' and os.path.exists(attach):
+                    os.remove(attach)
+                    remove_attach(attach)
               limite +=1
            else:
               break
@@ -2633,16 +2760,18 @@ def async_inclick_cmd(bot, message, replies, payload):
     loop.run_until_complete(inline_cmd(bot, message, replies, payload))
 
 async def search_chats(bot, message, replies, payload):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para buscar chats, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
     try:
-        if not os.path.exists(message.get_sender_contact().addr):
-           os.mkdir(message.get_sender_contact().addr)
-        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+        if not os.path.exists(addr):
+           os.mkdir(addr)
+        client = TC(StringSession(logindb[addr]), api_id, api_hash)
         await client.connect()
         all_chats = await client.get_dialogs()
         id_chats = {}
+        
         for d in all_chats:
             id_chats[d.entity.id] = ''
         resultados = await client(functions.contacts.SearchRequest(q=payload, limit=5))
@@ -2650,24 +2779,29 @@ async def search_chats(bot, message, replies, payload):
            replies.add('La busqueda no arrojó ningun resultado.')
            await client.disconnect()
            return
+        myreplies = Replies(bot, logger=bot.logger)
         for rchat in resultados.chats:
             if hasattr(rchat, 'photo'):
-               profile_img = await client.download_profile_photo(rchat, message.get_sender_contact().addr)
+               profile_img = await client.download_profile_photo(rchat, addr)
             else:
                profile_img = ''
             if rchat.id in id_chats:
-               replies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nCargar: /load_'+str(rchat.username), filename = profile_img)
+               myreplies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nCargar: /load_'+str(rchat.username), filename = profile_img, chat=message.chat)
             else:
-               replies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nUnirse: /join_'+str(rchat.username)+'\nVista previa: /preview_'+str(rchat.username), filename = profile_img)
+               myreplies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nUnirse: /join_'+str(rchat.username)+'\nVista previa: /preview_'+str(rchat.username), filename = profile_img, chat=message.chat)
         for ruser in resultados.users:
             if hasattr(ruser, 'photo'):
-               profile_img = await client.download_profile_photo(ruser, message.get_sender_contact().addr)
+               profile_img = await client.download_profile_photo(ruser, addr)
             else:
                profile_img =''
             if ruser.id in id_chats:
-               replies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nCargar: /load_'+str(ruser.username), filename = profile_img)
+               myreplies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nCargar: /load_'+str(ruser.username), filename = profile_img, chat=message.chat)
             else:
-               replies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nVista previa: /preview_'+str(ruser.username), filename = profile_img)
+               myreplies.add(text = 'Usuario\n\n'+str(ruser.first_name)+'\nVista previa: /preview_'+str(ruser.username), filename = profile_img, chat=message.chat)
+        myreplies.send_reply_messages()
+        if profile_img!='' and os.path.exists(profile_img):
+           os.remove(profile_img)
+           remove_attach(profile_img)
         await client.disconnect()
     except:
         code = str(sys.exc_info())
@@ -2678,11 +2812,12 @@ def async_search_chats(bot, message, replies, payload):
     loop.run_until_complete(search_chats(bot, message, replies, payload))
 
 async def join_chats(bot, message, replies, payload):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para buscar chats, use los comandos:\n/login SUNUMERO\no\n/token SUTOKEN para iniciar, use /help para ver la lista de comandos.')
        return
     try:
-        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+        client = TC(StringSession(logindb[addr]), api_id, api_hash)
         await client.connect()
         await client.get_dialogs()
         if payload.find('/joinchat/')>0:
@@ -2709,19 +2844,20 @@ def async_join_chats(bot, message, replies, payload):
 async def preview_chats(bot, payload, replies, message):
     global DBXTOKEN
     global DATABASE_URL
+    addr = message.get_sender_contact().addr
     try:
-        if message.get_sender_contact().addr not in logindb:
+        if addr not in logindb:
            replies.add(text = 'Debe iniciar sesión para visualizar chats!')
            return
-        if not os.path.exists(message.get_sender_contact().addr):
-           os.mkdir(message.get_sender_contact().addr)
+        if not os.path.exists(addr):
+           os.mkdir(addr)
         contacto = message.get_sender_contact()
         uid = ''
-        client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+        client = TC(StringSession(logindb[addr]), api_id, api_hash)
         await client.connect()
         await client.get_dialogs()
-        if message.get_sender_contact().addr not in chatdb:
-           chatdb[message.get_sender_contact().addr] = {}
+        if addr not in chatdb:
+           chatdb[addr] = {}
         if payload.find('/joinchat/')>0:
            invite_hash = payload.rsplit('/', 1)[-1]
            private = await client(functions.messages.CheckChatInviteRequest(hash=invite_hash))
@@ -2730,7 +2866,7 @@ async def preview_chats(bot, payload, replies, message):
            private_photo = ''
            private_text = ''
            if hasattr(private,'photo') and private.photo:
-              private_photo = await client.download_media(private.photo,message.get_sender_contact().addr)
+              private_photo = await client.download_media(private.photo, addr)
            if hasattr(private,'broadcast') and private.broadcast:
               private_text+='\nCanal'
            if hasattr(private,'public') and private.public:
@@ -2753,7 +2889,7 @@ async def preview_chats(bot, payload, replies, message):
            uid = payload.replace('https://t.me/','')
            uid = uid.replace('@','')
            uid = uid.replace(' ','_')
-        if str(uid) not in chatdb[message.get_sender_contact().addr]:
+        if str(uid) not in chatdb[addr]:
            ttitle = 'Preview of'
            replies.add(text = 'Creando chat...')
            #try input from cache first
@@ -2788,12 +2924,13 @@ async def preview_chats(bot, payload, replies, message):
               titulo = str(ttitle)+' ['+str(uid)+']'
            chat_id = bot.create_group(titulo, [contacto])
            try:
-               img = await client.download_profile_photo(uid, message.get_sender_contact().addr)
+               img = await client.download_profile_photo(uid, addr)
                if img and os.path.exists(img):
                   chat_id.set_profile_image(img)
+                  os.remove(img)
            except:
                print('Error al poner foto del perfil al chat:\n'+str(img))
-           chatdb[message.get_sender_contact().addr][str(uid)] = str(chat_id.get_name())
+           chatdb[addr][str(uid)] = str(chat_id.get_name())
            replies.add(text = 'Se ha creado una vista previa del chat '+str(ttitle))
            replies.add(text = "Cargar más mensajes\n/more_-0", chat = chat_id)
            bot.set(str(chat_id.id),str(uid))
@@ -2913,12 +3050,13 @@ def stop_updater(bot: DeltaBot, payload, replies, message: Message):
        replies.add(text='Las autodescargas no fueron iniciadas!')
 
 async def c_run(bot, payload, replies, message):
-    if message.get_sender_contact().addr not in logindb:
+    addr = message.get_sender_contact().addr
+    if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para ejecutar comandos!')
        return
     try:
        replies.add(text='Ejecutando...')
-       client = TC(StringSession(logindb[message.get_sender_contact().addr]), api_id, api_hash)
+       client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
        code = str(await eval(payload))
