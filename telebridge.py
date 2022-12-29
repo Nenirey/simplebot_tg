@@ -6,6 +6,7 @@ from deltachat import account_hookimpl
 from typing import Optional
 import sys
 import os
+import io
 from os.path import expanduser
 import psutil
 from telethon.sessions import StringSession
@@ -49,7 +50,8 @@ import markdown
 import random
 import string
 
-version = "0.2.12"
+
+version = "0.2.16"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -232,8 +234,8 @@ def zipdir(dir_path,file_path):
         zf.write(dirname)
         print(dirname)
         for filename in files:
-            if filename=='bot.db-journal':
-               continue
+            #if filename=='bot.db-journal':
+               #continue
             print(filename)
             zf.write(os.path.join(dirname, filename))
     zf.close()
@@ -319,7 +321,7 @@ def remove_attach(filename):
     if os.path.exists(bot_attach):
        print("Eliminando adjunto "+filename)
        os.remove(bot_attach)
-
+"""
 class AccountPlugin:
       #def __init__(self, bot:DeltaBot) -> None:
       #    self.bot = bot
@@ -344,7 +346,7 @@ class AccountPlugin:
              if msg in unreaddb:
                 async_read_unread(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
                 del unreaddb[msg]
-
+"""
 
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
@@ -356,7 +358,7 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
        print('Usuario '+str(sender_addr)+' no esta en la lista blanca')
        return True
     if black_list and sender_addr!=admin_addr and sender_addr in black_list:
-       print('Usuario '+str(message.get_sender_contact().addr)+' esta en la lista negra')
+       print('Usuario '+str(sender_addr)+' esta en la lista negra')
        return True
     #print(message)
     """
@@ -373,19 +375,21 @@ def deltabot_incoming_message(message, replies) -> Optional[bool]:
     """
     return None
 
+"""
 @simplebot.hookimpl
 def deltabot_member_added(chat, contact, actor, message, replies, bot) -> None:
     if actor:
        print('Miembro '+str(contact.addr)+' agregado por '+str(actor.addr)+' chat: '+str(chat.get_name()))
     else:
        print('My self!')
+"""
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
-    bot.account.add_account_plugin(AccountPlugin())
+    #bot.account.add_account_plugin(AccountPlugin())
     bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar("telegram.jpeg")
-    bot.account.set_config("delete_device_after","21600")
+    #bot.account.set_config("delete_device_after","21600")
     global MAX_MSG_LOAD
     global MAX_MSG_LOAD_AUTO
     global MAX_AUTO_CHATS
@@ -479,7 +483,7 @@ def deltabot_start(bot: DeltaBot) -> None:
     autochatsdb = json.loads(bot.get('AUTOCHATSDB') or '{}')
     global aliasdb
     aliasdb = json.loads(bot.get('ALIASDB') or '{}')
-    fixautochats(bot)
+    #fixautochats(bot)
     for (key,_) in logindb.items():
         loop.run_until_complete(load_delta_chats(contacto=key))
         time.sleep(5)
@@ -1871,7 +1875,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                     for coment in comentarios:
                         if isinstance(coment.from_id, types.PeerUser):
                            full = await client(GetFullUserRequest(coment.from_id))
-                           from_coment = safe_html(str(full.users[0].first_name))
+                           from_coment = markdown.markdown(str(full.users[0].first_name))
                         else:
                            from_coment = "Unknown"
                         if coment.photo:
@@ -1913,6 +1917,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message is a reply
               if hasattr(m,'reply_to') and m.reply_to:
                  if hasattr(m.reply_to,'reply_to_msg_id') and m.reply_to.reply_to_msg_id:
+                    if hasattr(m.reply_to,'forum_topic') and m.reply_to.forum_topic:
+                       ftopic = await client(functions.channels.GetForumTopicsByIDRequest(m.input_chat, [m.reply_to.reply_to_msg_id]))
+                       if hasattr(ftopic.topics[0],'title'):
+                          mquote = '>'+ftopic.topics[0].title+' >\n'
                     dc_mid = find_register_msg(contacto, int(dc_id), m.reply_to.reply_to_msg_id)
                     if dc_mid:
                        try:
@@ -1957,10 +1965,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                  if ent_type_str.find('MessageEntitySpoiler')>=0:
                                     reply_msg = parse_entiti('▚',reply_msg, ent.offset, ent.length)
                                     break
-                          reply_text += reply_msg
+                          if reply_msg:
+                             reply_text += reply_msg
                           if len(reply_text)>60:
                              reply_text = reply_text[0:60]+'...'
-                          mquote = '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
+                          if hasattr(mensaje[0].reply_to,'forum_topic') and mensaje[0].reply_to.forum_topic:
+                             ftopic = await client(functions.channels.GetForumTopicsByIDRequest(mensaje[0].input_chat, [mensaje[0].reply_to.reply_to_msg_id]))
+                             if hasattr(ftopic.topics[0],'title'):
+                                mquote += '>'+ftopic.topics[0].title+' >\n'
+                          mquote += '>'+reply_send_by+reply_text.replace('\n','\n>')+'\n\n'
 
               #check if message is a system message
               if hasattr(m,'action') and m.action:
@@ -2086,7 +2099,10 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                  if hasattr(m.reactions,'results') and m.reactions.results:
                     reactions_text += "\n\n"
                     for react in m.reactions.results:
-                        reactions_text += "("+('•' if react.chosen else '')+react.reaction+str(react.count)+") "
+                        if hasattr(react,'chosen'):
+                           reactions_text += "("+('•' if react.chosen else '')+react.reaction+str(react.count)+") "
+                        elif hasattr(react, 'chosen_order'):
+                           reactions_text += "("+('•' if react.chosen_order else '')+react.reaction.emoticon+str(react.count)+") "
                     reactions_text += "\n\n"
 
               #check if message have document
@@ -2410,8 +2426,12 @@ async def echo_filter(bot, message, replies):
        mtext = mquote+message.text
        if message.filename:
           if message.is_audio() or message.filename.lower().endswith('.aac'):
-              m = await client.send_file(target, message.filename, voice_note=True, reply_to = t_reply, comment_to = t_comment)
-              register_msg(addr, message.chat.id, message.id, m.id)
+             file = io.BytesIO(open(message.filename, 'rb').read())
+             file.name = "dummy.ogg"
+             waveform = utils.encode_waveform(file.getvalue())
+             #duration = (utils._get_metadata(file).get('duration').seconds)
+             m = await client.send_file(target, file, voice_note=True, attributes=[types.DocumentAttributeAudio(duration=-1, voice=True, waveform=waveform)], reply_to = t_reply, comment_to = t_comment)
+             register_msg(addr, message.chat.id, message.id, m.id)
           else:
              if len(mtext) > 1024:
                  m = await client.send_file(target, message.filename, caption = mtext[0:1024], reply_to = t_reply, comment_to = t_comment)
@@ -2426,7 +2446,7 @@ async def echo_filter(bot, message, replies):
                 else:
                    m = await client.send_file(target, message.filename, caption = mtext, reply_to = t_reply, comment_to = t_comment)
                    register_msg(addr, message.chat.id, message.id, m.id)
-          remove_attach(message.filename)
+             remove_attach(message.filename)
        else:
           if len(mtext) > 4096:
              for x in range(0, len(mtext), 4096):
@@ -2820,9 +2840,11 @@ async def join_chats(bot, message, replies, payload):
         client = TC(StringSession(logindb[addr]), api_id, api_hash)
         await client.connect()
         await client.get_dialogs()
-        if payload.find('/joinchat/')>0:
+        if payload.lower().find('/joinchat/')>0 or payload.lower().find('https://t.me/+')>=0:
            invite_hash = payload.rsplit('/', 1)[-1]
-           await client(ImportChatInviteRequest(invite_hash))
+           invite_hash = invite_hash.replace('+', '')
+           invite_result = await client(ImportChatInviteRequest(invite_hash))
+           replies.add(text=invite_result.stringify())
         else:
            uname = payload.replace('@','')
            uname = uname.replace(' ','_')
@@ -2858,8 +2880,9 @@ async def preview_chats(bot, payload, replies, message):
         await client.get_dialogs()
         if addr not in chatdb:
            chatdb[addr] = {}
-        if payload.find('/joinchat/')>0:
+        if payload.lower().find('/joinchat/')>0 or payload.lower().find('https://t.me/+')>=0:
            invite_hash = payload.rsplit('/', 1)[-1]
+           invite_hash = invite_hash.replace('+','')
            private = await client(functions.messages.CheckChatInviteRequest(hash=invite_hash))
            if not private:
               private = await client(functions.messages.CheckChatInviteRequest(hash=invite_hash))
@@ -3007,7 +3030,7 @@ async def auto_load(bot, message, replies):
                                 await read_unread(unreaddb[key][0],unreaddb[key][1],unreaddb[key][2])
                                 del unreaddb[key]
                                 break
-                      elif len(bot.get_chat(int(inkey)).get_contacts())<3 and bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('rejected: Mailbox is full')>0:
+                      elif bot.get_chat(int(inkey)) and len(bot.get_chat(int(inkey)).get_contacts())<3 and bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('rejected: Mailbox is full')>0:
                          print('Bandeja llena...')
                          del unreaddb[key]
                       else:
@@ -3059,7 +3082,9 @@ async def c_run(bot, payload, replies, message):
        client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
        await client.get_dialogs()
-       code = str(await eval(payload))
+       lines = payload.split('\n')
+       result = await eval(lines[0])
+       code = str(eval("result"+lines[1]))
        if replies:
           replies.add(text = code)
        await client.disconnect()
@@ -3141,7 +3166,7 @@ def bot_settings(bot: DeltaBot, payload, replies, message: Message):
        replies.add(text = 'Setting '+parametros[0]+' set to '+str(paramtext)+' successfully!')
 
 @simplebot.command(admin=True)
-def stats(replies) -> None:
+def stats(bot, replies) -> None:
     """Get bot and computer state."""
     mem = psutil.virtual_memory()
     swap = psutil.swap_memory()
@@ -3168,7 +3193,8 @@ def stats(replies) -> None:
         f"SimpleBot: {simplebot.__version__}\n"
         f"DeltaChat: {deltachat.__version__}\n"
         f"Telethon: {TC.__version__}\n"
-        f"simplebot_tg: {version}\n"
+        f"simplebot_tg: {version}\n",
+        html=bot.account.get_connectivity_html()
     )
 
 def sizeof_fmt(num: float) -> str:
