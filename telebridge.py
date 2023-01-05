@@ -1503,11 +1503,11 @@ async def react_button(bot, message, replies, payload):
                  text_reactions+=r.reaction
              replies.add(text = "Reacciones disponibles en este chat:\n\n"+text_reactions)
        else:
-          await client(functions.messages.SendReactionRequest(peer=target, msg_id=t_reply, reaction=parametros[-1]))
+          await client(functions.messages.SendReactionRequest(peer=target, msg_id=t_reply, reaction=[types.ReactionEmoji( emoticon=parametros[-1] )]))
        await client.disconnect()
-    except:
-       code = str(sys.exc_info())
-       replies.add(text=code)
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       replies.add(text=estr)
 
 def async_react_button(bot, message, replies, payload):
     """Send reaction to message repling it like: /react ❤"""
@@ -2102,7 +2102,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                         if hasattr(react,'chosen'):
                            reactions_text += "("+('•' if react.chosen else '')+react.reaction+str(react.count)+") "
                         elif hasattr(react, 'chosen_order'):
-                           reactions_text += "("+('•' if react.chosen_order else '')+react.reaction.emoticon+str(react.count)+") "
+                           reactions_text += "("+('•' if react.chosen_order is not None else '')+react.reaction.emoticon+str(react.count)+") "
                     reactions_text += "\n\n"
 
               #check if message have document
