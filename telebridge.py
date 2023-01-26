@@ -51,13 +51,17 @@ import random
 import string
 
 
-version = "0.2.16"
+version = "0.2.18"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
 DATABASE_URL = os.getenv('DATABASE_URL')
+TGTOKEN = os.getenv('TGTOKEN')
+ADDR = os.getenv('ADDR')
 bot_home = expanduser("~")
+MAX_BUBBLE_SIZE = 1000
+MAX_BUBBLE_LINES = 38
 
 global phonedb
 phonedb = {}
@@ -157,11 +161,13 @@ if DBXTOKEN:
                 "access token from the app console on the web.")
 
 def save_bot_db():
-    if DBXTOKEN:
+    if TGTOKEN:
+       async_cloud_db()
+    elif DBXTOKEN:
        backup_db()
     elif DATABASE_URL:
        db_save()
-
+       
 
 def backup(backup_path):
     with open(backup_path, 'rb') as f:
@@ -225,6 +231,28 @@ def db_save():
        if con is not None:
            con.close()
            print('Database connection closed.')
+           
+           
+async def cloud_db(tfile):
+    try:
+       client = TC(StringSession(TGTOKEN), api_id, api_hash)
+       await client.connect()
+       await client.get_dialogs()
+       storage_msg = await client.get_messages('me', search='simplebot_tg_db\n'+ADDR)
+       if storage_msg.total>0:
+          await client.edit_message('me', storage_msg[-1].id, 'simplebot_tg_db\n'+ADDR+'\n'+str(datetime.now()), file=tfile)
+       else:
+          await client.send_message('me', 'simplebot_tg_db\n'+ADDR+'\n'+str(datetime.now()), file=tfile)
+       await client.disconnect()
+       os.remove('./'+tfile)
+    except Exception as e:
+       estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+       print(estr)
+       
+def async_cloud_db():
+    zipfile = zipdir(bot_home+'/.simplebot/', encode_bot_addr+'.zip')
+    loop.run_until_complete(cloud_db(zipfile))
+    
 
 def zipdir(dir_path,file_path):
     zf = zipfile.ZipFile(file_path, "w", compression=zipfile.ZIP_LZMA)
@@ -321,16 +349,14 @@ def remove_attach(filename):
     if os.path.exists(bot_attach):
        print("Eliminando adjunto "+filename)
        os.remove(bot_attach)
-"""
+
 class AccountPlugin:
-      #def __init__(self, bot:DeltaBot) -> None:
-      #    self.bot = bot
       @account_hookimpl
       def ac_chat_modified(self, chat):
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_multiuser():
              save_bot_db()
-
+"""
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
           if ffi_event.name=="DC_EVENT_WEBXDC_STATUS_UPDATE":
@@ -601,7 +627,7 @@ def get_tg_id(chat, bot):
     tg_ids = []
     if f_id:
        tg_ids = [f_id]
-    elif not DBXTOKEN and not DATABASE_URL:
+    elif not DBXTOKEN and not DATABASE_URL and not TGTOKEN:
        dchat = chat.get_name()
        tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
        if len(tg_ids)>0:
@@ -618,9 +644,9 @@ def get_tg_id(chat, bot):
 def get_tg_reply(chat, bot):
     f_id = bot.get("rp2_"+str(chat.id))
     tg_ids = []
-    if f_id and (DBXTOKEN or DATABASE_URL):
+    if f_id and (DBXTOKEN or DATABASE_URL or TGTOKEN):
        tg_ids = [f_id]
-    elif not DBXTOKEN and not DATABASE_URL:
+    elif not DBXTOKEN and not DATABASE_URL and not TGTOKEN:
        dchat = chat.get_name()
        tg_ids = re.findall(r"\(([0-9]+)\)", dchat)
        if len(tg_ids)>0:
@@ -1238,7 +1264,6 @@ async def login_code(bot, payload, replies, message):
           try:
               me = await clientdb[addr].sign_in(phone=phonedb[addr], phone_code_hash=hashdb[addr], code=payload)
               logindb[addr]=clientdb[addr].session.save()
-              savelogin(bot)
               replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
               replies.add(text = '/token '+logindb[addr])
               await clientdb[addr].disconnect()
@@ -1259,6 +1284,7 @@ def async_login_code(bot, payload, replies, message):
     loop.run_until_complete(login_code(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
+       savelogin(bot)
 
 async def login_2fa(bot, payload, replies, message):
     try:
@@ -1268,7 +1294,6 @@ async def login_2fa(bot, payload, replies, message):
        if addr in phonedb and addr in hashdb and addr in clientdb and addr in smsdb:
           me = await clientdb[addr].sign_in(phone=phonedb[addr], password=payload)
           logindb[addr]=clientdb[addr].session.save()
-          savelogin(bot)
           replies.add(text = 'Se ha iniciado sesiòn correctamente, copie y pegue el mensaje del token en privado para iniciar rápidamente.\n⚠No debe compartir su token con nadie porque pueden usar su cuenta con este.\n\nAhora puede escribir /load para cargar sus chats.')
           replies.add(text = '/token '+logindb[addr])
           await clientdb[addr].disconnect()
@@ -1291,6 +1316,7 @@ def async_login_2fa(bot, payload, replies, message):
     loop.run_until_complete(login_2fa(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
+       savelogin(bot)
 
 async def login_session(bot, payload, replies, message):
     if message.chat.is_multiuser():
@@ -1299,6 +1325,9 @@ async def login_session(bot, payload, replies, message):
     if addr not in logindb:
        try:
            hash = payload.replace(' ','_')
+           if not hash:
+              replies.add('Debe proporcionar el token!')
+              return
            client = TC(StringSession(hash), api_id, api_hash)
            await client.connect()
            my = await client.get_me()
@@ -1313,7 +1342,6 @@ async def login_session(bot, payload, replies, message):
            nombre= (first_name + ' ' + last_name).strip()
            await client.disconnect()
            logindb[addr] = hash
-           savelogin(bot)
            replies.add(text='Se ha iniciado sesión correctamente '+str(nombre))
        except:
           code = str(sys.exc_info())
@@ -1327,6 +1355,7 @@ def async_login_session(bot, payload, replies, message):
     loop.run_until_complete(login_session(bot, payload, replies, message))
     if message.get_sender_contact().addr in logindb:
        async_load_delta_chats(message = message, replies = replies)
+       savelogin(bot)
 
 async def updater(bot, payload, replies, message):
     global DBXTOKEN
@@ -1371,7 +1400,7 @@ async def updater(bot, payload, replies, message):
               else:
                  find_only = True
            if str(d.id) not in chatdb[addr] and not private_only and not find_only:
-              if DBXTOKEN or DATABASE_URL:
+              if DBXTOKEN or DATABASE_URL or TGTOKEN:
                  titulo = str(ttitle)
                  if my_id == d.id:
                     titulo = 'Mensajes guardados'
@@ -1572,28 +1601,26 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     try:
        client = TC(StringSession(logindb[contacto]), api_id, api_hash, auto_reconnect=not is_auto, retry_delay = 16)
        await client.connect()
-       await client.get_dialogs()
-       tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
+       all_chats = await client.get_dialogs()
+       tchat = None
+       for ch in all_chats:
+           if "-100"+str(ch.entity.id) == str(target) or ch.entity.id == target:
+              tchat = ch
+           elif hasattr(ch.entity,'username') and str(ch.entity.username) == str(target):
+              tchat = ch
+           if tchat is not None:
+              break
+       #if not tchat:
+          #rchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
+          #tchat = rchat.dialogs[0]
        ttitle = 'Unknown'
        me = await client.get_me()
        my_id = me.id
        #extract chat title
-       if hasattr(tchat,'chats') and tchat.chats:
-          ttitle = tchat.chats[0].title
-       else:
-          if hasattr(tchat,'users') and tchat.users[0]:
-             if tchat.users[0].first_name:
-                first_name= tchat.users[0].first_name
-             else:
-                first_name= ""
-             if tchat.users[0].last_name:
-                last_name= tchat.users[0].last_name
-             else:
-                last_name= ""
-             ttitle = (first_name + ' ' + last_name).strip()
+       ttitle = tchat.title
        if rpto:
           t = await client.get_messages(target, reply_to=rpto)
-       sin_leer = tchat.dialogs[0].unread_count
+       sin_leer = tchat.unread_count
        limite = 0
        load_history = False
        show_id = False
@@ -1829,6 +1856,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                                  html_spoiler += str(detail)
                         elif isinstance(block, types.PageBlockPreformatted):
                            html_spoiler += "<br><br>"+extract_text_block(block)
+                        elif isinstance(block, types.PageBlockKicker):
+                           html_spoiler += "<br><br><h3>"+extract_text_block(block)+"</h3>"
                         elif isinstance(block, types.PageBlockRelatedArticles):
                            for article in block.articles:
                                if hasattr(article,'title') and article.title:
@@ -2240,9 +2269,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                        else:
                           full_text = fwd_text+mquote+send_by+str(wtitle)+"\n"+wmessage+str(wurl)
                           bubble_command = (down_button if f_size>0 else "")+reactions_text+comment_text+html_buttons+msg_id
-                          if len(full_text+bubble_command)>1000:
-                             bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
-                             html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                          if len(full_text+bubble_command)>MAX_BUBBLE_SIZE or str(full_text+bubble_command).count('\n')>MAX_BUBBLE_LINES:
+                             if len(bubble_command)>MAX_BUBBLE_SIZE or bubble_command.count('\n')>MAX_BUBBLE_LINES:
+                                bubble_text = full_text[0:MAX_BUBBLE_LINES-1]+" [...]"
+                                if not html_spoiler:
+                                   html_spoiler = markdown.markdown(full_text+bubble_command)+(html_spoiler or "")
+                             else:
+                                bubble_text = full_text[0:MAX_BUBBLE_SIZE-str(bubble_command).count('\n')-1]+" [...]"
+                                if not html_spoiler:
+                                   html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
                           else:
                              bubble_text = full_text
                           myreplies.add(text = bubble_text+bubble_command, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
@@ -2253,9 +2288,15 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               if no_media:
                  full_text = fwd_text+mservice+mquote+send_by+str(text_message)+poll_message
                  bubble_command = reactions_text+comment_text+html_buttons+msg_id
-                 if len(full_text+bubble_command)>1000:
-                    bubble_text = full_text[0:1000-len(bubble_command)-6]+" [...]"
-                    html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
+                 if len(full_text+bubble_command)>MAX_BUBBLE_SIZE or str(full_text+bubble_command).count('\n')>MAX_BUBBLE_LINES:
+                    if len(bubble_command)>MAX_BUBBLE_SIZE or bubble_command.count('\n')>MAX_BUBBLE_LINES:
+                       bubble_text = full_text[0:MAX_BUBBLE_LINES-1]+" [...]"
+                       if not html_spoiler:
+                          html_spoiler = markdown.markdown(full_text+bubble_command)+(html_spoiler or "")
+                    else:
+                       bubble_text = full_text[0:MAX_BUBBLE_LINES-str(bubble_command).count('\n')-1]+" [...]"
+                       if not html_spoiler:
+                          html_spoiler = markdown.markdown(full_text)+(html_spoiler or "")
                  else:
                     bubble_text = full_text
                  myreplies.add(text = bubble_text+bubble_command, chat = chat_id, quote = quote, html = html_spoiler, sender = sender_name)
@@ -2290,7 +2331,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        if load_history and not is_pdown:
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
-       if DBXTOKEN or DATABASE_URL:
+       if DBXTOKEN or DATABASE_URL or TGTOKEN:
           if dchat!=str(ttitle) and len(chat_id.get_contacts())<3 and not rpto:
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
@@ -2387,11 +2428,21 @@ async def echo_filter(bot, message, replies):
     try:
        client = TC(StringSession(logindb[addr]), api_id, api_hash)
        await client.connect()
-       await client.get_dialogs()
+       all_chats = await client.get_dialogs()
+       tchat = None
        #prevent ghost mode
        if not c_id:
-         tchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
-         sin_leer = tchat.dialogs[0].unread_count
+         for chat in all_chats:
+           if "-100"+str(chat.entity.id) == str(target) or chat.entity.id==target:
+              tchat = chat
+           elif hasattr(chat.entity,'username') and chat.entity.username == target:
+              tchat = chat
+           if tchat is not None:
+              break
+           #else:
+             #rchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
+             #tchat = rchat.dialogs[0]
+         sin_leer = tchat.unread_count
          await client.send_read_acknowledge(target)
        else:
          sin_leer = 0
@@ -2810,7 +2861,7 @@ async def search_chats(bot, message, replies, payload):
             else:
                myreplies.add(text = 'Grupo/Canal\n\n'+str(rchat.title)+'\nUnirse: /join_'+str(rchat.username)+'\nVista previa: /preview_'+str(rchat.username), filename = profile_img, chat=message.chat)
         for ruser in resultados.users:
-            if hasattr(ruser, 'photo'):
+            if hasattr(ruser, 'photo') and ruser.photo:
                profile_img = await client.download_profile_photo(ruser, addr)
             else:
                profile_img =''
@@ -2823,9 +2874,9 @@ async def search_chats(bot, message, replies, payload):
            os.remove(profile_img)
            remove_attach(profile_img)
         await client.disconnect()
-    except:
-        code = str(sys.exc_info())
-        replies.add(text=code)
+    except Exception as e:
+        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+        replies.add(text=estr)
 
 def async_search_chats(bot, message, replies, payload):
     """Make search for public telegram chats. Example: /search delta chat"""
@@ -2941,7 +2992,7 @@ async def preview_chats(bot, payload, replies, message):
               else:
                  if hasattr(pchat, 'first_name') and pchat.first_name:
                     ttitle = str(pchat.first_name)
-           if DBXTOKEN or DATABASE_URL:
+           if DBXTOKEN or DATABASE_URL or TGTOKEN:
               titulo = str(ttitle)
            else:
               titulo = str(ttitle)+' ['+str(uid)+']'
@@ -2980,7 +3031,7 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
 def create_comment_chat(bot, message, replies, payload):
     """Create a comment chat for post messages like /chat 1234"""
     target = get_tg_id(message.chat, bot)
-    if DBXTOKEN or DATABASE_URL:
+    if DBXTOKEN or DATABASE_URL or TGTOKEN:
        tmp_name = message.chat.get_name()
     else:
        tmp_name = message.chat.get_name()+' ['+str(target)+']'
@@ -2989,7 +3040,7 @@ def create_comment_chat(bot, message, replies, payload):
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = chat_id.id, is_auto = True))
     replies.add(text = "Cargar más comentarios\n/more", chat = chat_id)
     bot.set("rp2_"+str(chat_id.id), payload)
-    if DBXTOKEN or DATABASE_URL:
+    if DBXTOKEN or DATABASE_URL or TGTOKEN:
        chat_name ='💬 '+message.chat.get_name()
     else:
        chat_name ='💬 '+message.chat.get_name()+' ['+str(target)+']('+payload+')'
