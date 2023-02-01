@@ -38,25 +38,19 @@ from lottie.importers import importers
 from lottie.exporters import exporters
 from lottie.utils.stripper import float_strip, heavy_strip
 #For secure cloud storage
-import dropbox
-from dropbox.files import WriteMode
-from dropbox.exceptions import ApiError, AuthError
-from dropbox import DropboxOAuth2FlowNoRedirect
 import zipfile
 import base64
-import psycopg2
 import html
 import markdown
 import random
 import string
 
 
-version = "0.2.18"
+version = "0.2.20"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
 admin_addr = os.getenv('ADMIN')
-DATABASE_URL = os.getenv('DATABASE_URL')
 TGTOKEN = os.getenv('TGTOKEN')
 ADDR = os.getenv('ADDR')
 bot_home = expanduser("~")
@@ -141,98 +135,11 @@ dark_html = """<!DOCTYPE html>
 
 loop = asyncio.new_event_loop()
 
-#Secure save storage to use in non persistent storage
-DBXTOKEN = os.getenv('DBXTOKEN')
-APP_KEY = os.getenv('APP_KEY')
-
-if APP_KEY:
-   auth_flow = DropboxOAuth2FlowNoRedirect(APP_KEY, use_pkce=True, token_access_type='offline')
-
-if DBXTOKEN:
-   if APP_KEY:
-      dbx = dropbox.Dropbox(oauth2_refresh_token=DBXTOKEN, app_key=APP_KEY)
-   else:
-      dbx = dropbox.Dropbox(DBXTOKEN)
-   # Check that the access token is valid
-   try:
-      dbx.users_get_current_account()
-   except AuthError:
-       print("ERROR: Invalid access token; try re-generating an "
-                "access token from the app console on the web.")
-
+#start secure storage save
 def save_bot_db():
     if TGTOKEN:
        async_cloud_db()
-    elif DBXTOKEN:
-       backup_db()
-    elif DATABASE_URL:
-       db_save()
        
-
-def backup(backup_path):
-    with open(backup_path, 'rb') as f:
-        print("Uploading " + backup_path + " to Dropbox...")
-        if backup_path.startswith('.'):
-           dbx_backup_path = backup_path.replace('.','',1)
-        else:
-           dbx_backup_path =backup_path
-        try:
-            dbx.files_upload(f.read(), dbx_backup_path, mode=WriteMode('overwrite'))
-        except ApiError as err:
-            # This checks for the specific error where a user doesn't have
-            # enough Dropbox space quota to upload this file
-            if (err.error.is_path() and
-                    err.error.get_path().reason.is_insufficient_space()):
-                #sys.exit("ERROR: Cannot back up; insufficient space.")
-                print("ERROR: Cannot back up; insufficient space.", err)
-            elif err.user_message_text:
-                print(err.user_message_text)
-                sys.exit()
-            else:
-                print(err)
-                sys.exit()
-
-def db_init():
-    try:
-       con = psycopg2.connect(DATABASE_URL)
-       cur = con.cursor()
-       cur.execute("SELECT * FROM information_schema.tables WHERE table_name=%s", ('simplebot_db',))
-       if bool(cur.rowcount):
-          print("La tabla existe!")
-       else:
-          print("La tabla no existe, creando...")
-          cur.execute("CREATE TABLE simplebot_db (id bigint PRIMARY KEY, name TEXT, data BYTEA)")
-          con.commit()
-          cur.execute("ALTER TABLE simplebot_db ALTER COLUMN data SET STORAGE EXTERNAL")
-          con.commit()
-       cur.close()
-    except Exception as error:
-       print('Cause: {}'.format(error))
-    finally:
-       if con is not None:
-           con.close()
-           print('Database connection closed.')
-
-def db_save():
-    try:
-       con = psycopg2.connect(DATABASE_URL)
-       cur = con.cursor()
-       print("Salvando a postgres...")
-       zipfile = zipdir(bot_home+'/.simplebot/', encode_bot_addr+'.zip')
-       bin = open(zipfile, 'rb').read()
-       #cur.execute("TRUNCATE simplebot_db")
-       #con.commit()
-       cur.execute("INSERT INTO simplebot_db(id,name,data) VALUES(%s,%s,%s) ON CONFLICT (id) DO UPDATE SET name = excluded.name, data = excluded.data", (0,encode_bot_addr, psycopg2.Binary(bin)))
-       con.commit()
-       cur.close()
-    except Exception as error:
-       print('Cause: {}'.format(error))
-    finally:
-       if con is not None:
-           con.close()
-           print('Database connection closed.')
-           
-           
 async def cloud_db(tfile):
     try:
        client = TC(StringSession(TGTOKEN), api_id, api_hash)
@@ -253,7 +160,6 @@ def async_cloud_db():
     zipfile = zipdir(bot_home+'/.simplebot/', encode_bot_addr+'.zip')
     loop.run_until_complete(cloud_db(zipfile))
     
-
 def zipdir(dir_path,file_path):
     zf = zipfile.ZipFile(file_path, "w", compression=zipfile.ZIP_LZMA)
     for dirname, subdirs, files in os.walk(dir_path):
@@ -356,7 +262,7 @@ class AccountPlugin:
           print('Chat modificado/creado: '+chat.get_name())
           if chat.is_multiuser():
              save_bot_db()
-"""
+             
       @account_hookimpl
       def ac_process_ffi_event(self, ffi_event):
           if ffi_event.name=="DC_EVENT_WEBXDC_STATUS_UPDATE":
@@ -370,9 +276,8 @@ class AccountPlugin:
              msg = str(ffi_event.data1)+':'+str(ffi_event.data2)
              print(msg)
              if msg in unreaddb:
-                async_read_unread(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
+                #async_read_unread(unreaddb[msg][0], unreaddb[msg][1], unreaddb[msg][2])
                 del unreaddb[msg]
-"""
 
 @simplebot.hookimpl(tryfirst=True)
 def deltabot_incoming_message(message, replies) -> Optional[bool]:
@@ -412,7 +317,7 @@ def deltabot_member_added(chat, contact, actor, message, replies, bot) -> None:
 
 @simplebot.hookimpl
 def deltabot_init(bot: DeltaBot) -> None:
-    #bot.account.add_account_plugin(AccountPlugin())
+    bot.account.add_account_plugin(AccountPlugin())
     bot.account.set_config("displayname","Telegram Bridge")
     bot.account.set_avatar("telegram.jpeg")
     #bot.account.set_config("delete_device_after","21600")
@@ -484,7 +389,6 @@ def deltabot_init(bot: DeltaBot) -> None:
     bot.commands.register(name = "/setting" ,func = bot_settings, admin = True)
     bot.commands.register(name = "/react" ,func = async_react_button)
     bot.commands.register(name = "/link2" ,func = link_to)
-    bot.commands.register(name = "/dbxtoken" ,func = get_dbxtoken, admin = True)
     bot.commands.register(name = "/chat" ,func = create_comment_chat)
     bot.commands.register(name = "/alias" ,func = create_alias)
 
@@ -534,20 +438,6 @@ def create_alias(bot, replies, message, payload):
           bot.get_chat(prealiasdb[parametros[0]]).send_text('Alias '+addr+' confirmado para '+prealiasdb[parametros[0]])
           del prealiasdb[parametros[0]]
        
-
-def get_dbxtoken(bot, replies, message, payload):
-    "Get fresh Dropbox Token (DBXTOKEN)"
-    global authorize_url
-    if APP_KEY:
-       try:
-          authorize_url = auth_flow.start()
-          replies.add(text='Por favor acceda a la siguiente URI, presione [Allow o Permitir], copie el codigo de autorizacion y envielo aqui:\n\n'+str(authorize_url))
-       except:
-          code = str(sys.exc_info())
-          replies.add(text=code)
-    else:
-       replies.add(text='Debe colocar su APP_KEY de Dropbox en las variables de entorno, para poder generar nuevos codigos de acceso.')
-    
 def parse_entiti(r_text, s_text,offset,tlen):
     if r_text == '▚':
        h_text = helpers.add_surrogate(r_text*tlen)
@@ -627,7 +517,7 @@ def get_tg_id(chat, bot):
     tg_ids = []
     if f_id:
        tg_ids = [f_id]
-    elif not DBXTOKEN and not DATABASE_URL and not TGTOKEN:
+    elif not TGTOKEN:
        dchat = chat.get_name()
        tg_ids = re.findall(r"\[([\-A-Za-z0-9_]+)\]", dchat)
        if len(tg_ids)>0:
@@ -644,9 +534,9 @@ def get_tg_id(chat, bot):
 def get_tg_reply(chat, bot):
     f_id = bot.get("rp2_"+str(chat.id))
     tg_ids = []
-    if f_id and (DBXTOKEN or DATABASE_URL or TGTOKEN):
+    if f_id and TGTOKEN:
        tg_ids = [f_id]
-    elif not DBXTOKEN and not DATABASE_URL and not TGTOKEN:
+    elif not TGTOKEN:
        dchat = chat.get_name()
        tg_ids = re.findall(r"\(([0-9]+)\)", dchat)
        if len(tg_ids)>0:
@@ -1099,8 +989,6 @@ def async_add_auto_chats(bot, replies, message):
     """Enable auto load messages in the current chat. Example: /auto"""
     loop.run_until_complete(add_auto_chats(bot, replies, message))
     saveautochats(bot)
-    #if DBXTOKEN:
-    #   backup_db(bot)
 
 async def save_delta_chats(replies, message):
     """This is for save the chats deltachat/telegram in Telegram Saved message user"""
@@ -1358,8 +1246,6 @@ def async_login_session(bot, payload, replies, message):
        savelogin(bot)
 
 async def updater(bot, payload, replies, message):
-    global DBXTOKEN
-    global DATABASE_URL
     addr = message.get_sender_contact().addr
     if addr not in logindb:
        replies.add(text = 'Debe iniciar sesión para cargar sus chats!')
@@ -1400,7 +1286,7 @@ async def updater(bot, payload, replies, message):
               else:
                  find_only = True
            if str(d.id) not in chatdb[addr] and not private_only and not find_only:
-              if DBXTOKEN or DATABASE_URL or TGTOKEN:
+              if TGTOKEN:
                  titulo = str(ttitle)
                  if my_id == d.id:
                     titulo = 'Mensajes guardados'
@@ -1547,8 +1433,6 @@ def async_react_button(bot, message, replies, payload):
 
 
 async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies, payload = None, dc_contact = None, dc_id = None, is_auto = False):
-    global DBXTOKEN
-    global DATABASE_URL
     global bot_addr
     contacto = dc_contact
     chat_id = bot.get_chat(int(dc_id))
@@ -2331,7 +2215,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        if load_history and not is_pdown:
           myreplies.add(text = "Cargar más mensajes:\n➕ /more_-"+str(m_id), chat = chat_id)
        myreplies.send_reply_messages()
-       if DBXTOKEN or DATABASE_URL or TGTOKEN:
+       if TGTOKEN:
           if dchat!=str(ttitle) and len(chat_id.get_contacts())<3 and not rpto:
              print('Actualizando nombre de chat...')
              chat_id.set_name(str(ttitle))
@@ -2526,15 +2410,6 @@ async def echo_filter(bot, message, replies):
 @simplebot.filter
 def async_echo_filter(bot, message, replies):
     """Write direct in chat bridge to write to telegram chat"""
-    global authorize_url
-    if authorize_url and not message.chat.is_multiuser():
-       try:
-          oauth_result = auth_flow.finish(message.text)
-          replies.add(text='Se ha generado un nuevo codigo de acceso valido, copielo y sustituya DBXTOKEN por el mismo:\n\n'+oauth_result.refresh_token)
-       except Exception as e:
-          replies.add(text=str(e))
-       authorize_url = None
-       return
     loop.run_until_complete(echo_filter(bot, message, replies))
 
 async def send_cmd(bot, message, replies, payload):
@@ -2915,8 +2790,6 @@ def async_join_chats(bot, message, replies, payload):
        async_save_delta_chats(replies = replies, message = message)
 
 async def preview_chats(bot, payload, replies, message):
-    global DBXTOKEN
-    global DATABASE_URL
     addr = message.get_sender_contact().addr
     try:
         if addr not in logindb:
@@ -2992,7 +2865,7 @@ async def preview_chats(bot, payload, replies, message):
               else:
                  if hasattr(pchat, 'first_name') and pchat.first_name:
                     ttitle = str(pchat.first_name)
-           if DBXTOKEN or DATABASE_URL or TGTOKEN:
+           if TGTOKEN:
               titulo = str(ttitle)
            else:
               titulo = str(ttitle)+' ['+str(uid)+']'
@@ -3031,7 +2904,7 @@ def eval_func(bot: DeltaBot, payload, replies, message: Message):
 def create_comment_chat(bot, message, replies, payload):
     """Create a comment chat for post messages like /chat 1234"""
     target = get_tg_id(message.chat, bot)
-    if DBXTOKEN or DATABASE_URL or TGTOKEN:
+    if TGTOKEN:
        tmp_name = message.chat.get_name()
     else:
        tmp_name = message.chat.get_name()+' ['+str(target)+']'
@@ -3040,7 +2913,7 @@ def create_comment_chat(bot, message, replies, payload):
     loop.run_until_complete(load_chat_messages(bot = bot, message=message, replies=replies, payload=payload, dc_contact = message.get_sender_contact().addr, dc_id = chat_id.id, is_auto = True))
     replies.add(text = "Cargar más comentarios\n/more", chat = chat_id)
     bot.set("rp2_"+str(chat_id.id), payload)
-    if DBXTOKEN or DATABASE_URL or TGTOKEN:
+    if TGTOKEN:
        chat_name ='💬 '+message.chat.get_name()
     else:
        chat_name ='💬 '+message.chat.get_name()+' ['+str(target)+']('+payload+')'
@@ -3078,7 +2951,7 @@ async def auto_load(bot, message, replies):
                          for key, _ in unreaddb.items():
                              if key.startswith(str(inkey)+':'):
                                 print('Confirmando lectura de mensaje '+key)
-                                await read_unread(unreaddb[key][0],unreaddb[key][1],unreaddb[key][2])
+                                #await read_unread(unreaddb[key][0],unreaddb[key][1],unreaddb[key][2])
                                 del unreaddb[key]
                                 break
                       elif bot.get_chat(int(inkey)) and len(bot.get_chat(int(inkey)).get_contacts())<3 and bot.get_chat(int(inkey)).get_messages()[-1].get_message_info().find('rejected: Mailbox is full')>0:
