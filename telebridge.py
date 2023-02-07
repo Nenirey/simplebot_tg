@@ -45,8 +45,7 @@ import markdown
 import random
 import string
 
-
-version = "0.2.20"
+version = "0.2.21"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -1488,7 +1487,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        all_chats = await client.get_dialogs()
        tchat = None
        for ch in all_chats:
-           if "-100"+str(ch.entity.id) == str(target) or ch.entity.id == target:
+           if "-100"+str(ch.entity.id) == str(target) or "-"+str(ch.entity.id) == str(target) or ch.entity.id == target:
               tchat = ch
            elif hasattr(ch.entity,'username') and str(ch.entity.username) == str(target):
               tchat = ch
@@ -1497,6 +1496,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        #if not tchat:
           #rchat = await client(functions.messages.GetPeerDialogsRequest(peers=[target] ))
           #tchat = rchat.dialogs[0]
+       #if tchat.message:
+          #previous_reactions = client(functions.messages.GetUnreadReactionsRequest(peer=target, offset_id=0, add_offset=0, limit=100,  min_id=0, max_id=tchat.message.id))
        ttitle = 'Unknown'
        me = await client.get_me()
        my_id = me.id
@@ -1953,7 +1954,7 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
               #check if message have buttons
               if hasattr(m,'reply_markup') and m.reply_markup and hasattr(m.reply_markup,'rows'):
                  nrow = 0
-                 html_buttons = '\n\n---\n'
+                 html_buttons = '\n---'
                  username_bot = None
                  uri_command = 'None'
                  for row in m.reply_markup.rows:
@@ -1979,7 +1980,6 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
                          else:
                             html_buttons += '['+str(b.text)+' /c_'+str(m.id)+'_'+str(nrow)+'_'+str(ncolumn)+'] '
                          ncolumn += 1
-                     html_buttons += '\n'
                      nrow += 1
 
               #check if message is a poll
