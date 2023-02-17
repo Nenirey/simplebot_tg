@@ -23,6 +23,7 @@ from telethon.tl.types import InputPeerEmpty, WebDocument, WebDocumentNoProxy, I
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon import utils, errors
 from telethon.errors import SessionPasswordNeededError
+from telethon.errors.rpcerrorlist import AuthKeyDuplicatedError
 from telethon import helpers
 import asyncio
 import re
@@ -45,7 +46,7 @@ import markdown
 import random
 import string
 
-version = "0.2.21"
+version = "0.2.23"
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 login_hash = os.getenv('LOGIN_HASH')
@@ -393,15 +394,6 @@ def deltabot_init(bot: DeltaBot) -> None:
 
 @simplebot.hookimpl
 def deltabot_start(bot: DeltaBot) -> None:
-    bridge_init = Event()
-    Thread(
-        target=start_background_loop,
-        args=(bridge_init,),
-        daemon=True,
-    ).start()
-    bridge_init.wait()
-    global auto_load_task
-    auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
     global bot_addr
     bot_addr = bot.account.get_config('addr')
     global encode_bot_addr
@@ -416,6 +408,15 @@ def deltabot_start(bot: DeltaBot) -> None:
     for (key,_) in logindb.items():
         loop.run_until_complete(load_delta_chats(contacto=key))
         time.sleep(5)
+    bridge_init = Event()
+    Thread(
+        target=start_background_loop,
+        args=(bridge_init,),
+        daemon=True,
+    ).start()
+    bridge_init.wait()
+    global auto_load_task
+    auto_load_task = asyncio.run_coroutine_threadsafe(auto_load(bot=bot, message = Message, replies = Replies),tloop)
     if admin_addr:
        bot.get_chat(admin_addr).send_text('El bot '+bot_addr+' se ha iniciado correctamente')
 
@@ -2223,6 +2224,11 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
     except Exception as e:
        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
        print(estr)
+       if isinstance(e, AuthKeyDuplicatedError):
+          print('Eliminando sesión inválida...')
+          myreplies.add(text='⚠️ Su token ha sido invalidado, debe iniciar sesión nuevamente.', chat = chat_id)
+          myreplies.send_reply_messages()
+          del logindb[contacto]
        if not is_auto:
           myreplies.add(text=estr, chat = chat_id)
           myreplies.send_reply_messages()
@@ -2470,10 +2476,10 @@ async def send_cmd(bot, message, replies, payload):
        if m:
           register_msg(addr, message.chat.id, message.id, m.id)
        await client.disconnect()
-    except:
-       await client(SendMessageRequest(target, payload))
-       code = str(sys.exc_info())
-       replies.add(text=code)
+    except Exception as e:
+        estr = str('Error on line {}'.format(sys.exc_info()[-1].tb_lineno)+'\n'+str(type(e).__name__)+'\n'+str(e))
+        replies.add(text=estr)
+        #await client(SendMessageRequest(target, payload))
 
 def async_send_cmd(bot, message, replies, payload):
     """Send command to telegram chats. Example /b /help"""
