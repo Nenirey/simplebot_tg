@@ -1503,7 +1503,8 @@ async def load_chat_messages(bot: DeltaBot, message = Message, replies = Replies
        me = await client.get_me()
        my_id = me.id
        #extract chat title
-       ttitle = tchat.title
+       if tchat:
+          ttitle = tchat.title
        if rpto:
           t = await client.get_messages(target, reply_to=rpto)
        sin_leer = tchat.unread_count
